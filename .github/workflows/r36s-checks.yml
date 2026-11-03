@@ -26,7 +26,8 @@ jobs:
           bash -n tools/r36s/build.sh
           bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
           bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py
+          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py
+          python3 tools/r36s/prepare_data.py --help >/dev/null
           python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
           python3 - <<'PY'
           import json
