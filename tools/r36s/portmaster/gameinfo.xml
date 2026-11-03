@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gameList>
+  <game>
+    <path>./Killer Instinct Arcade.sh</path>
+    <name>Killer Instinct (Arcade - ki-recomp)</name>
+    <desc>Experimental ARM64 R36S port of kilnan's KI static recompilation. Original arcade game files required, not included. Port: dehalbuq.</desc>
+    <developer>Rare</developer><publisher>Midway</publisher>
+    <genre>Fighting</genre><players>1-2</players>
+  </game>
+</gameList>

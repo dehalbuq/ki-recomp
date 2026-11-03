@@ -1,0 +1,33 @@
+{
+  "version": 4,
+  "name": "killerinstinct.zip",
+  "items": [
+    "Killer Instinct Arcade.sh",
+    "killerinstinct"
+  ],
+  "items_opt": [],
+  "attr": {
+    "title": "Killer Instinct (Arcade) — ki-recomp",
+    "porter": [
+      "dehalbuq"
+    ],
+    "desc": "Experimental SDL2 ARM64 R36S/PortMaster port of kilnan's static recompilation.",
+    "desc_md": null,
+    "inst": "Supply your own legal kinst.zip (BIOS L1.5D) and kinst.chd in killerinstinct/gamedata.",
+    "inst_md": null,
+    "genres": [
+      "fighting"
+    ],
+    "image": null,
+    "rtr": false,
+    "exp": true,
+    "runtime": [],
+    "store": [],
+    "availability": "full",
+    "reqs": [],
+    "arch": [
+      "aarch64"
+    ],
+    "min_glibc": ""
+  }
+}
