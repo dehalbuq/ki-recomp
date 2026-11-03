@@ -180,18 +180,53 @@ int main(int argc, char** argv) {
         }
     }
     ki::install_fight_choice(&fight);
+#ifdef KI_R36S
+    // Exact 320x240 -> 640x480 scaling, without changing the guest frame rate.
+    scale = 2;
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+    std::fprintf(stderr, "[r36s] fullscreen 4:3 / nearest / original 58.98 Hz timing\n");
+#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
+    Uint32 window_flags = SDL_WINDOW_RESIZABLE;
+#ifdef KI_R36S
+    window_flags = SDL_WINDOW_FULLSCREEN_DESKTOP;
+#endif
     SDL_Window* window = SDL_CreateWindow(kTitle, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 320 * scale,
-                                          240 * scale, SDL_WINDOW_RESIZABLE);
+                                          240 * scale, window_flags);
+    if (!window) {
+        std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
+        SDL_Quit();
+        return 1;
+    }
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+#ifdef KI_R36S
+    if (!renderer) {
+        std::fprintf(stderr, "[r36s] accelerated renderer failed: %s; trying software\n", SDL_GetError());
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    }
+#endif
+    if (!renderer) {
+        std::fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
+#ifdef KI_R36S
+    SDL_RendererInfo ri{};
+    if (SDL_GetRendererInfo(renderer, &ri) == 0)
+        std::fprintf(stderr, "[r36s] SDL renderer: %s, flags=0x%x\n", ri.name, ri.flags);
+#endif
     // 16:9: the 4:3 picture in the middle of a 427x240 view; the sides show a
     // blurred, darkened copy of the picture ("ambient"). V switches, remembered.
     bool wide = read_text(pref_path() + "aspect.txt") == "16:9";
     if (!aspect_arg.empty()) wide = aspect_arg == "16:9";
     auto set_aspect = [&](bool w) {
+#ifdef KI_R36S
+        w = false; // physical R36S panel is 4:3
+#endif
         wide = w;
         SDL_RenderSetLogicalSize(renderer, wide ? kWideW : 320, 240);
         int ww = 0, wh = 0;
@@ -205,6 +240,14 @@ int main(int argc, char** argv) {
     SDL_SetTextureScaleMode(ambient, SDL_ScaleModeLinear);
     SDL_Texture* texture =
         SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 320, 240);
+    if (!texture) {
+        std::fprintf(stderr, "SDL_CreateTexture failed: %s\n", SDL_GetError());
+        SDL_Quit();
+        return 1;
+    }
+#ifdef KI_R36S
+    SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
+#endif
     SDL_Texture* hd_texture = nullptr;  // 4x picture when an HD pack is loaded (H toggles)
 
     // ---- the game's files ----
@@ -523,6 +566,29 @@ int main(int argc, char** argv) {
         int player = 0;
         for (SDL_GameController* pad : pads)
             if (pad && SDL_GameControllerGetAttached(pad) && player < 2) (player++ == 0 ? p1 : p2) &= ~ki::pad::pressed(pad, pad_actions);
+#ifdef KI_R36S
+        // Hold Start+Select/Back for >= 1200 ms to exit safely.
+        static Uint32 quit_combo_since = 0;
+        bool quit_combo = false;
+        for (SDL_GameController* pad : pads) {
+            if (!pad || !SDL_GameControllerGetAttached(pad)) continue;
+            const bool start = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_START);
+            const bool select = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_BACK) ||
+                                SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_GUIDE);
+            if (start && select) { quit_combo = true; break; }
+        }
+        if (quit_combo) {
+            if (!quit_combo_since) quit_combo_since = SDL_GetTicks();
+            else if (SDL_TICKS_PASSED(SDL_GetTicks(), quit_combo_since + 1200u)) {
+                std::fprintf(stderr, "[r36s] Start+Select: exiting\n");
+                save();
+                SDL_Quit();
+                std::exit(0);
+            }
+        } else {
+            quit_combo_since = 0;
+        }
+#endif
         board.p1 = p1;
         board.p2 = p2;
 
