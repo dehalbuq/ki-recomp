@@ -20,7 +20,7 @@ jobs:
           ctest --test-dir build-ci --output-on-failure -R '^runtime_selftest$'
       - name: Compile R36S SDL player translation units (syntax-only)
         run: |
-          c++ -std=c++20 -fsyntax-only -DKI_R36S=1 -Iruntime/include -Isrc $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
+          c++ -std=c++20 -fsyntax-only -DKI_R36S=1 -Iruntime/include -Ithird_party/adsp2100 -Isrc $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
       - name: Check PortMaster packaging scripts and metadata
         run: |
           bash -n tools/r36s/build.sh
