@@ -10,15 +10,17 @@ The SDL2 player selects full-screen 4:3, nearest-neighbor scaling for its native
 
 Place the original MAME Killer Instinct `kinst` ROMs and `kinst.chd` in `data/roms/kinst/`, including `ki-l15d.u98`, as documented in the root README. Original ROMs are also needed to generate recompiled C++ code, which must stay out of public git history.
 
-From Linux with required packages, install Python/rabbitizer in a venv:
+On Linux (e.g. Kali x86_64), install the build-host tools and prepare the original game set:
 
 ```sh
+sudo apt update
+sudo apt install -y git gcc g++ make cmake ninja-build python3-venv pkg-config unzip
 python3 -m venv .venv
 .venv/bin/pip install rabbitizer==1.16.2
-./tools/extract_game_code.sh
+python3 tools/r36s/prepare_data.py "/path/to/kinst.zip" "/path/to/kinst.chd"
 ```
 
-This runs an external kipack utility from ki-rom to produce `data/kipack-out/rom-{0,1,2}.bin`. Follow the upstream README for dependencies and source licensing.
+The preparation helper verifies all nine ROMs by SHA1, copies the player's own files locally into `data/roms/kinst/`, and calls the external `kipack` utility from ki-rom. That produces `data/kipack-out/rom-{0,1,2}.bin`. The raw CHD content is checked later when the full player loads it. Neither original assets nor game-derived generated C++ go in the public repository. See the upstream README for licensing and further dependencies.
 
 ## Build
 
