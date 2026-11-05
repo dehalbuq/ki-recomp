@@ -287,4 +287,20 @@ if(KI_BUILD_FULL)
     endif()
     message(STATUS "SDL2 not found: ki_play is not built")
   endif()
+
+  # RK3326 has Cortex-A35 cores. Tune the native machine code without
+  # changing emulated timing or applying unsafe floating point shortcuts.
+  if(KI_R36S AND CMAKE_BUILD_TYPE STREQUAL "Release" AND
+     CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|AARCH64")
+    foreach(ki_r36s_target IN ITEMS ki_runtime ki_full_code ki_boot_rom_code
+        ki_boot adsp2105 ki_play)
+      target_compile_options(${ki_r36s_target} PRIVATE -mcpu=cortex-a35)
+    endforeach()
+    if(KI_WITH_CHD)
+      target_compile_options(ki_files PRIVATE -mcpu=cortex-a35)
+      target_compile_options(ki_hd PRIVATE -mcpu=cortex-a35)
+      target_compile_options(chdr-static PRIVATE -mcpu=cortex-a35)
+    endif()
+    message(STATUS "R36S Cortex-A35 tuning active (no fast-math or LTO)")
+  endif()
 endif()
