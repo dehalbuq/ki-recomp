@@ -5,6 +5,33 @@ on:
   pull_request:
   workflow_dispatch:
 jobs:
+  cross-compiler-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install AArch64 C and C++ cross toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+      - name: Verify both C and C++ objects target AArch64 (no ROMs)
+        run: |
+          mkdir -p /tmp/ki-cross-check
+          cat > /tmp/ki-cross-check/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.20)
+          project(ki_cross_compiler_check LANGUAGES C CXX)
+          add_library(c_object STATIC c_object.c)
+          add_library(cpp_object STATIC cpp_object.cpp)
+          EOF
+          echo 'int ki_c_check(void) { return 4; }' > /tmp/ki-cross-check/c_object.c
+          echo 'int ki_cpp_check() { return 8; }' > /tmp/ki-cross-check/cpp_object.cpp
+          cmake -S /tmp/ki-cross-check -B /tmp/ki-cross-check/build -G Ninja \
+            -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+          cmake --build /tmp/ki-cross-check/build --parallel 2
+          readelf -h /tmp/ki-cross-check/build/CMakeFiles/c_object.dir/c_object.c.o | grep 'Machine:.*AArch64'
+          readelf -h /tmp/ki-cross-check/build/CMakeFiles/cpp_object.dir/cpp_object.cpp.o | grep 'Machine:.*AArch64'
+          bash -n tools/r36s/build.sh
   native-arm64:
     runs-on: ubuntu-24.04-arm
     steps:
