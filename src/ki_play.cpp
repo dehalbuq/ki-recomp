@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -187,7 +188,17 @@ int main(int argc, char** argv) {
     // Exact 320x240 -> 640x480 scaling, without changing the guest frame rate.
     scale = 2;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-    std::fprintf(stderr, "[r36s] fullscreen 4:3 / nearest / original 58.98 Hz timing\n");
+    // The DarkOSre log reported flags=0xe: OpenGL ES 2 plus driver VSync.
+    // Disable it to avoid expensive blocking at SDL_RenderPresent, but keep
+    // the existing guest 58.98 Hz frame pacer, so game speed does not increase.
+    SDL_SetHintWithPriority(SDL_HINT_RENDER_VSYNC, "0", SDL_HINT_OVERRIDE);
+    const bool r36s_bench_no_dcs = std::getenv("KI_R36S_BENCH_NO_DCS") != nullptr;
+    const int r36s_bench_render_every = std::getenv("KI_R36S_BENCH_RENDER_QUARTER") ? 4 : 1;
+    std::fprintf(stderr, "[r36s] fullscreen 4:3 / nearest / original 58.98 Hz timing; VSync requested OFF\n");
+    if (r36s_bench_no_dcs)
+        std::fprintf(stderr, "[r36s] BENCHMARK: audio DSP disabled (diagnosis only; NOT normal gameplay)\n");
+    if (r36s_bench_render_every != 1)
+        std::fprintf(stderr, "[r36s] BENCHMARK: draw 1 in 4 guest frames (diagnosis only; not default)\n");
 #endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
@@ -218,9 +229,15 @@ int main(int argc, char** argv) {
         return 1;
     }
 #ifdef KI_R36S
+#if SDL_VERSION_ATLEAST(2, 0, 18)
+    if (SDL_RenderSetVSync(renderer, 0) != 0)
+        std::fprintf(stderr, "[r36s] WARNING: SDL_RenderSetVSync(0): %s\n", SDL_GetError());
+#endif
     SDL_RendererInfo ri{};
     if (SDL_GetRendererInfo(renderer, &ri) == 0)
-        std::fprintf(stderr, "[r36s] SDL renderer: %s, flags=0x%x\n", ri.name, ri.flags);
+        std::fprintf(stderr, "[r36s] SDL renderer: %s, flags=0x%x; accelerated=%d, vsync=%d\n",
+                     ri.name, ri.flags, !!(ri.flags & SDL_RENDERER_ACCELERATED),
+                     !!(ri.flags & SDL_RENDERER_PRESENTVSYNC));
 #endif
     // 16:9: the 4:3 picture in the middle of a 427x240 view; the sides show a
     // blurred, darkened copy of the picture ("ambient"). V switches, remembered.
@@ -254,6 +271,9 @@ int main(int argc, char** argv) {
     SDL_Texture* hd_texture = nullptr;  // 4x picture when an HD pack is loaded (H toggles)
 
     // ---- the game's files ----
+#ifdef KI_R36S
+    const auto r36s_load_start = std::chrono::steady_clock::now();
+#endif
     std::vector<uint8_t> disk_image, boot_rom;
     std::vector<std::vector<uint8_t>> sound;
     const bool dev = !boot.empty();
@@ -329,6 +349,11 @@ int main(int argc, char** argv) {
         return 2;
 #endif
     }
+#ifdef KI_R36S
+    std::fprintf(stderr, "[r36s] game data loaded: %.2f s; expanded disk %.1f MiB\n",
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - r36s_load_start).count(),
+        static_cast<double>(disk_image.size()) / (1024 * 1024));
+#endif
 
     static ki::Context c;
     // --boot rom (and player mode): start at the reset vector, like the real board.
@@ -339,7 +364,11 @@ int main(int argc, char** argv) {
     if (cold) board.set_cycles_to_vblank(0);
     static std::unique_ptr<ki::Dcs> dcs;
     SDL_AudioDeviceID audio = 0;
-    if (!sound.empty()) {
+    if (!sound.empty()
+#ifdef KI_R36S
+        && !r36s_bench_no_dcs
+#endif
+        ) {
         dcs = std::make_unique<ki::Dcs>(sound);
         board.dcs = dcs.get();
         if (!mute) {
@@ -404,6 +433,37 @@ int main(int argc, char** argv) {
     Uint32 r36s_menu_action_ms = 0;
     auto r36s_sample_start = std::chrono::steady_clock::now();
     unsigned r36s_sample_frames = 0;
+    unsigned r36s_present_frames = 0;
+    double r36s_render_ms = 0, r36s_rgb_ms = 0, r36s_swap_ms = 0;
+    auto r36s_cpu_begin = std::clock();
+    auto r36s_proc_read_bytes = []() -> unsigned long long {
+        std::ifstream file("/proc/self/io");
+        std::string key;
+        unsigned long long value = 0;
+        while (file >> key >> value)
+            if (key == "read_bytes:") return value;
+        return 0;
+    };
+    auto r36s_rss_kib = []() -> unsigned long {
+        std::ifstream file("/proc/self/status");
+        std::string key;
+        unsigned long value = 0;
+        while (file >> key) {
+            if (key == "VmRSS:") { file >> value; return value; }
+            std::string remainder;
+            std::getline(file, remainder);
+        }
+        return 0;
+    };
+    auto r36s_cpu_khz = []() -> unsigned long {
+        std::ifstream f("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq");
+        unsigned long val = 0;
+        f >> val;
+        return val;
+    };
+    unsigned long long r36s_read_begin = r36s_proc_read_bytes();
+    std::vector<uint8_t> r36s_frame_rgb;
+    r36s_frame_rgb.reserve(320 * 240 * 3);
 #endif
     uint64_t saved_writes = 0;
     uint64_t title_reset_frame = 0;
@@ -419,9 +479,20 @@ int main(int argc, char** argv) {
     static std::vector<ki::pad::Action> pad_actions = ki::pad::load_bindings(pref_path() + "pad_map.txt");
     static ki::pad::SetupScreen pad_setup(pad_actions, pref_path() + "pad_map.txt");
     auto present = [&](ki::Context& ctx) {
+#ifdef KI_R36S
+        const auto render_begin = std::chrono::steady_clock::now();
+#endif
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
+#ifdef KI_R36S
+        const auto rgb_begin = std::chrono::steady_clock::now();
+        board.framebuffer_rgb_into(ctx, r36s_frame_rgb);
+        const std::vector<uint8_t>& rgb = r36s_frame_rgb;
+        r36s_rgb_ms += std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - rgb_begin).count();
+#else
         auto rgb = board.framebuffer_rgb(ctx);
+#endif
         const SDL_FRect game{wide ? (kWideW - 320) / 2.0f : 0.0f, 0.0f, 320.0f, 240.0f};
         if (wide) {
             // Ambient sides: the picture averaged down to 40x30, stretched over the
@@ -491,8 +562,16 @@ int main(int argc, char** argv) {
         SDL_RenderSetViewport(renderer, nullptr);
 #ifdef KI_R36S
         if (r36s_menu_open) ki_r36s::draw(renderer, r36s_menu_choice);
+        const auto swap_begin = std::chrono::steady_clock::now();
 #endif
         SDL_RenderPresent(renderer);
+#ifdef KI_R36S
+        r36s_swap_ms += std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - swap_begin).count();
+        r36s_render_ms += std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - render_begin).count();
+        ++r36s_present_frames;
+#endif
     };
     board.on_vblank = [&](ki::Context& ctx, uint64_t frame) {
         SDL_Event ev;
@@ -713,6 +792,23 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "[r36s] guest vblank rate: %.1f fps (frames=%u, %.1fs); audio queued=%u bytes\n",
                          r36s_sample_frames / secs, r36s_sample_frames, secs,
                          audio ? SDL_GetQueuedAudioSize(audio) : 0u);
+            const auto cpu_now = std::clock();
+            const double cpu_pct = 100.0 * static_cast<double>(cpu_now - r36s_cpu_begin) /
+                (static_cast<double>(CLOCKS_PER_SEC) * secs);
+            const unsigned long long reads_now = r36s_proc_read_bytes();
+            const unsigned long long read_delta = reads_now >= r36s_read_begin ? reads_now - r36s_read_begin : 0;
+            const double render_div = r36s_present_frames ? static_cast<double>(r36s_present_frames) : 1.0;
+            std::fprintf(stderr,
+                "[r36s] PERF fps=%.1f cpu=%.0f%% render=%.2fms rgb=%.2fms swap=%.2fms "
+                "drawn=%u sd_read=%.2fMiB rss=%.1fMiB cpu_khz=%lu\n",
+                r36s_sample_frames / secs, cpu_pct,
+                r36s_render_ms / render_div, r36s_rgb_ms / render_div, r36s_swap_ms / render_div,
+                r36s_present_frames, static_cast<double>(read_delta) / (1024.0 * 1024.0),
+                r36s_rss_kib() / 1024.0, r36s_cpu_khz());
+            r36s_cpu_begin = cpu_now;
+            r36s_read_begin = reads_now;
+            r36s_present_frames = 0;
+            r36s_render_ms = r36s_rgb_ms = r36s_swap_ms = 0.0;
             r36s_sample_frames = 0;
             r36s_sample_start = stamp;
         }
@@ -727,7 +823,12 @@ int main(int argc, char** argv) {
                 SDL_QueueAudio(audio, pcm.data(), static_cast<Uint32>(pcm.size() * sizeof(int16_t)));
             pcm.clear();
         }
+#ifdef KI_R36S
+        // Diagnostic-only A/B switch. Normal path renders EVERY game frame.
+        if ((!turbo || frame % 8 == 0) && frame % r36s_bench_render_every == 0) present(ctx);
+#else
         if (!turbo || frame % 8 == 0) present(ctx);
+#endif
         if (!turbo) {
             next_frame += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 std::chrono::duration<double>(kFrameSeconds));
