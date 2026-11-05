@@ -262,6 +262,18 @@ if(KI_BUILD_FULL)
       target_link_libraries(ki_play PRIVATE ki_files ki_hd)
       target_compile_definitions(ki_play PRIVATE KI_HAVE_FILES KI_HAVE_HD)
     endif()
+    if(KI_R36S AND NOT APPLE)
+      # The guest runtime needs symbols from the generated function table, but
+      # functions in the generated archive also refer back to the runtime.
+      # GNU ld's single-pass static archive scan otherwise leaves the table
+      # unresolved (undefined reference to ki::kFunctionTable[Size]).
+      # LINK_GROUP:RESCAN emits --start-group/--end-group on GNU ld and keeps
+      # link-order correctness regardless of dependent library ordering.
+      if(CMAKE_VERSION VERSION_LESS "3.24")
+        message(FATAL_ERROR "KI_R36S requires CMake >= 3.24 for LINK_GROUP:RESCAN")
+      endif()
+      target_link_libraries(ki_play PRIVATE "$<LINK_GROUP:RESCAN,ki_full_code,ki_runtime>")
+    endif()
   else()
     if(KI_R36S)
       message(FATAL_ERROR "KI_R36S requires SDL2 development files for the target architecture")
