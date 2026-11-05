@@ -19,7 +19,7 @@ KinstBoard::KinstBoard(std::vector<uint8_t> disk, std::vector<uint8_t> boot_rom)
     build_identify();
     ide_reset();
 #ifdef KI_R36S_FAST_DSP
-    fast_vblank_irq_ = std::getenv("KI_R36S_VBLANK_BASELINE") == nullptr;
+    fast_vblank_irq_ = std::getenv("KI_R36S_VBLANK_FAST_EXPERIMENT") != nullptr;
 #endif
 }
 
