@@ -29,6 +29,9 @@ public:
     uint64_t read(Context& c, uint32_t phys, int size) override;
     void write(Context& c, uint32_t phys, int size, uint64_t value) override;
     uint32_t interrupt_lines(Context& c) override;
+    // Test11: compare original modulo-based VBlank with the cycle-exact
+    // next-event fast path. Intended only as a reversible optimization.
+    void set_fast_vblank_irq(bool enabled) { fast_vblank_irq_ = enabled; }
     // For starts from a mid-game snapshot: cycles from cycle 0 to the next VBLANK start.
     void set_cycles_to_vblank(uint64_t cycles);
     // For starts from a mid-game snapshot: the logical CHS geometry the game set at
@@ -87,6 +90,7 @@ private:
     std::vector<uint32_t> written_;  // sorted, unique
     std::vector<uint64_t> io_reads_ = std::vector<uint64_t>(0x200), io_writes_ = std::vector<uint64_t>(0x200);
     uint64_t frame_ = 0, next_vblank_ = kVblankStart, phase_ = 0;
+    bool fast_vblank_irq_ = false;
     bool trace_vram_ = std::getenv("KI_TRACE_VRAM") != nullptr;
     uint32_t vram_control_ = 0, sound_control_ = 0, sound_data_ = 0, sound_reset_ = 0;
 
