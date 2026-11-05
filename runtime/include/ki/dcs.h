@@ -40,6 +40,9 @@ public:
     // direct-memory mode; exposed for side-by-side regression testing.
     void enable_ki_waitloop_fastpath(bool enabled);
     uint64_t waitloop_skipped_cycles() const;
+    // Opt-in host-time accounting of ADSP execution. Disabled in normal game.
+    struct TimingSample { uint64_t host_ns = 0, calls = 0, guest_cycles = 0; };
+    TimingSample take_timing_sample();
     // Diagnostic-only DSP instruction PC histogram sampled 1 in 1024.
     void enable_pc_profiling(bool enabled);
     void log_pc_hotspots(uint64_t guest_frame);
@@ -107,6 +110,10 @@ private:
     uint64_t dac_off_since_ = 0;  // DSP cycle since which the DAC has been off
     bool irq1_pending_clear_ = false;
     std::vector<int16_t> samples_;
+
+    // Opt-in profiler; no clock calls, allocations or logging in normal play.
+    bool time_dsp_ = false;
+    TimingSample timing_{};
 
     // internal timer
     bool timer_enable_ = false, timer_ignore_ = false, timer_armed_ = false;
