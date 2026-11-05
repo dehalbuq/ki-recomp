@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 
 namespace ki {
 
@@ -14,8 +15,28 @@ Dcs::Dcs(const std::vector<std::vector<uint8_t>>& roms)
         for (size_t j = 0; j < roms[k].size() && j < 0x100000; ++j)
             rom_[k * 0x100000 + j] = static_cast<uint16_t>(0xff00 | roms[k][j]);
     rom_banks_ = static_cast<uint32_t>(rom_.size() / 0x1000);
+    // U64Emu speedups inspired a cheaper *interpreter* fast path, not a
+    // copy of its firmware-specific HLE. Pointers stay valid for Dcs lifetime.
+    const bool fast = std::getenv("KI_DCS_BASELINE_MEMORY") == nullptr;
+    enable_fast_memory(fast);
+    std::fprintf(stderr, "[dcs] ADSP2105 memory path: %s\n", fast ? "direct-map (fast)" : "virtual Bus (baseline)");
     board_reset();
     dsp_.reset();
+}
+
+void Dcs::enable_fast_memory(bool enabled) {
+    if (!enabled) {
+        dsp_.set_dcs_fast_map({});
+        return;
+    }
+    adsp::Adsp2105::DcsFastMap map{};
+    map.internal_pram = internal_pram_.data();
+    map.external_pram = external_pram_.data();
+    map.internal_dram = internal_dram_.data();
+    map.sample_rom = rom_.data();
+    map.sample_bank = &bank_;
+    map.sample_banks = rom_banks_;
+    dsp_.set_dcs_fast_map(map);
 }
 
 void Dcs::copy_state_from(const Dcs& o) {
