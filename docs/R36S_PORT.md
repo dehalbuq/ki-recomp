@@ -14,7 +14,7 @@ On Linux (e.g. Kali x86_64), install the build-host tools and prepare the origin
 
 ```sh
 sudo apt update
-sudo apt install -y git gcc g++ make cmake ninja-build python3-venv pkg-config unzip
+sudo apt install -y git gcc g++ make cmake ninja-build python3-venv pkg-config unzip gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 python3 -m venv .venv
 .venv/bin/pip install rabbitizer==1.16.2
 python3 tools/r36s/prepare_data.py "/path/to/kinst.zip" "/path/to/kinst.chd"
@@ -27,10 +27,18 @@ The preparation helper verifies all nine ROMs by SHA1, copies the player's own f
 Use an AArch64 Linux environment (or Kali Linux x86_64 with `aarch64-linux-gnu-g++` and an **R36S-compatible AArch64 sysroot**). The firmware's glibc, libstdc++, SDL2 and graphics stack must be compatible; a generic Debian ARM64 binary may not run on ArkOS4Clone or DarkOSre.
 
 ```sh
+# If a previous attempt used host /usr/bin/cc, clean generated build outputs only:
+rm -rf build-r36s
+
+# The script now selects BOTH C and C++ AArch64 cross-compilers:
 bash tools/r36s/build.sh
+
 # Or with a target sysroot on x86_64:
-KI_CXX=aarch64-linux-gnu-g++ KI_SYSROOT=/path/to/r36s/sysroot bash tools/r36s/build.sh
+KI_CC=aarch64-linux-gnu-gcc KI_CXX=aarch64-linux-gnu-g++ \
+  KI_SYSROOT=/path/to/r36s/sysroot bash tools/r36s/build.sh
 ```
+
+**Cross-architecture link failure:** If the linker reports `Relocations in generic ELF (EM: 62)` or `file in wrong format`, C libraries such as libchdr were compiled as x86_64. Never mix native `cc` with `aarch64-linux-gnu-g++`. The corrected script sets both compiler paths, checks their `-dumpmachine` output, and rejects old CMake caches. `rm -rf build-r36s` affects generated objects only, not `data/roms/kinst` or `data/kipack-out`.
 
 The script builds a debug `build-r36s/ki_play` by default and prints ELF library/GLIBC requirements. Change `KI_BUILD_TYPE=Release` only after a working debug test. On cross compilation also set target-appropriate `PKG_CONFIG_LIBDIR`/`PKG_CONFIG_PATH` if SDL2 detection picks up host libraries. **Never bundle random glibc libraries** to overcome mismatches.
 
