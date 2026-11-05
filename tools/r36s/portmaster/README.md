@@ -10,10 +10,10 @@ The game is not included. Supply your own legally obtained arcade `kinst.zip` (B
 
 ## Controls
 
-D-pad = movement; X/Y/R1 = high attacks; A/B/R2 = low attacks; Start = start; Select or L1 = coin. Hold Start+Select for about 1.2 seconds to exit (if SDL2 exposes both buttons). Actual button mapping depends on firmware's SDL2 database.
+D-pad = movement; X/Y/R1 = high attacks; A/B/R2 = low attacks; Start = start; Select or L1 = coin. Hold Start+Select for about 0.8 seconds to open the pause/exit menu. Choose RESUME or EXIT with Up/Down and A; B returns to gameplay. A USB keyboard can also open the menu with F10 and exit immediately with Esc. Raw R36S Select=12 and Start=13 are read even without a GameController mapping. Actual button mapping depends on firmware's SDL2 database.
 
 ## Video and diagnostics
 
-The guest runs at the original ~58.98 Hz, 320x240 rendered at 640x480 in 4:3 nearest scaling. SDL2 uses accelerated rendering first, software fallback only for diagnostics. Log: `killerinstinct/logs/ki-r36s.log`.
+The guest runs at the original ~58.98 Hz, 320x240 rendered at 640x480 in 4:3 nearest scaling. SDL2 uses accelerated rendering first, software fallback only for diagnostics. Log: `killerinstinct/logs/ki-r36s.log`. The log reports the actual guest VBLANK/frame rate every five seconds; use this to measure real FPS and diagnose the bottleneck.
 
 **Not ready for PortMaster submission:** test the ARM64 binary on ArkOS/DarkOSre, validate glibc and dependencies, add a real gameplay screenshot and optional cover art. Never bundle the game's data in public packages.
