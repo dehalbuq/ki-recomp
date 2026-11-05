@@ -39,6 +39,29 @@ void Dcs::enable_fast_memory(bool enabled) {
     dsp_.set_dcs_fast_map(map);
 }
 
+void Dcs::enable_pc_profiling(bool enabled) {
+    dsp_.enable_pc_profiling(enabled);
+    std::fprintf(stderr, "[dcs] DSP PC sampling: %s (1/1024, diagnostic only)\n",
+                 enabled ? "ON" : "OFF");
+}
+
+void Dcs::log_pc_hotspots(uint64_t guest_frame) {
+    uint32_t sampled = 0;
+    auto hotspots = dsp_.take_pc_hotspots(12, sampled);
+    std::fprintf(stderr,
+        "[r36s] DSP_HOT frame=%llu dsp_cycles=%llu sampled=%u top=",
+        static_cast<unsigned long long>(guest_frame),
+        static_cast<unsigned long long>(dsp_.total_cycles()), sampled);
+    for (std::size_t i = 0; i < hotspots.size(); ++i) {
+        const auto& hot = hotspots[i];
+        const double percent = sampled ? (100.0 * hot.second / sampled) : 0.0;
+        std::fprintf(stderr, "%s%04x:%u(%.1f%%)",
+                     i ? "," : "", static_cast<unsigned>(hot.first),
+                     hot.second, percent);
+    }
+    std::fprintf(stderr, "\n");
+}
+
 void Dcs::copy_state_from(const Dcs& o) {
     internal_pram_ = o.internal_pram_;
     external_pram_ = o.external_pram_;
