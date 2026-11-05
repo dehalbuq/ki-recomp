@@ -81,8 +81,17 @@ inline void report(unsigned frames) {
         uintptr_t site = pc_ring[i].load(std::memory_order_relaxed);
         if (!site) continue;
         Dl_info info{};
-        if (!dladdr(reinterpret_cast<void*>(site), &info) || !info.dli_sname) {
-            ++histogram["<unknown>"];
+        if (!dladdr(reinterpret_cast<void*>(site), &info)) {
+            ++histogram["<unmapped>"];
+            continue;
+        }
+        if (!info.dli_sname) {
+            // Many SDL/GLES driver libraries are stripped: still report
+            // their module name instead of an opaque 20% <unknown> bucket.
+            std::string module = info.dli_fname ? info.dli_fname : "<anonymous>";
+            const auto slash = module.find_last_of('/');
+            if (slash != std::string::npos) module.erase(0, slash + 1);
+            ++histogram["<no-symbol>:" + module];
             continue;
         }
         int status = 0;
