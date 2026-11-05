@@ -9,7 +9,7 @@ PORTS="$(cd "$(dirname "$0")" && pwd)"
 GAMEDIR="$PORTS/killerinstinct"
 BIN="$GAMEDIR/ki_play.aarch64"
 mkdir -p "$GAMEDIR/logs" "$GAMEDIR/conf"
-LOG="$GAMEDIR/logs/ki-r36s.log"
+LOG="$GAMEDIR/logs/${KI_R36S_LOG_BASENAME:-ki-r36s}.log"
 exec > >(tee "$LOG") 2>&1
 
 echo "KI R36S prototype | $(date -Iseconds)"
