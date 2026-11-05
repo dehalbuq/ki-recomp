@@ -194,6 +194,7 @@ int main(int argc, char** argv) {
     SDL_SetHintWithPriority(SDL_HINT_RENDER_VSYNC, "0", SDL_HINT_OVERRIDE);
     const bool r36s_bench_no_dcs = std::getenv("KI_R36S_BENCH_NO_DCS") != nullptr;
     const bool r36s_audio_trace = std::getenv("KI_R36S_AUDIO_TRACE") != nullptr;
+    const bool r36s_dsp_hotspots = std::getenv("KI_R36S_DSP_HOTSPOTS") != nullptr;
     const int r36s_bench_render_every = std::getenv("KI_R36S_BENCH_RENDER_QUARTER") ? 4 : 1;
     std::fprintf(stderr, "[r36s] fullscreen 4:3 / nearest / original 58.98 Hz timing; VSync requested OFF\n");
     if (r36s_bench_no_dcs)
@@ -371,6 +372,9 @@ int main(int argc, char** argv) {
 #endif
         ) {
         dcs = std::make_unique<ki::Dcs>(sound);
+#ifdef KI_R36S
+        if (r36s_dsp_hotspots) dcs->enable_pc_profiling(true);
+#endif
         board.dcs = dcs.get();
         if (!mute) {
             // KI's DCS program drives the DAC at 31250 Hz; SDL converts to the device rate.
@@ -824,6 +828,8 @@ int main(int argc, char** argv) {
         if (dcs) {
             std::vector<int16_t>& pcm = dcs->samples();
 #ifdef KI_R36S
+            if (r36s_dsp_hotspots && frame % 300 == 0)
+                dcs->log_pc_hotspots(frame);
             if (r36s_audio_trace) {
                 // Hash PCM bytes in little-endian sample order, so the log can
                 // be compared at equal guest frame numbers across engines.
