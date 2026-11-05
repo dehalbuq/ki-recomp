@@ -189,10 +189,26 @@ interpreter is derived separately from MAME BSD-3-Clause code with
 attribution. All tests using commercial sound ROMs remain on private
 runners, never in public GitHub Actions or public release ZIPs.
 
+## Trace instrumentation (Test 06)
+
+A new optional diagnostic launcher, `KI R36S - Audio Trace.sh`, sets
+`KI_R36S_AUDIO_TRACE=1` and writes `ki-r36s-audio-trace.log`.
+It preserves the usual audio engine but logs guest-frame-indexed,
+running FNV-1a 64-bit hashes of 16-bit little-endian PCM samples, the number
+of samples and sample rate every 300 guest frames. DCS command values and
+DSP cycle timestamps are also logged.
+
+Run this launcher first at an identical game state with the baseline engine,
+then with a future HLE candidate. Sample data and timing mismatches are
+regressions to investigate; non-identical game inputs, saves, or execution
+paths will naturally make traces incomparable. The extra hashing/logging
+cost is paid **only** in trace mode.
+
 ## Status
 
 - **Done (Test 05):** DCS direct-memory path, ROM-free equivalence
   regression, safe fallback mode.
+- **Done (Test 06):** optional per-guest-frame PCM hash and DCS command traces.
 - **Not yet implemented:** new HLE audio backend, GPU shader replacement,
   MIPS background HLE, static per-site memory specialization, DSP threading.
 - **Do not promise FPS gains** for the latter until measured on R36S.
