@@ -443,6 +443,7 @@ int main(int argc, char** argv) {
     uint64_t r36s_audio_samples = 0;
     uint64_t r36s_audio_hash = 14695981039346656037ull; // FNV-1a 64-bit offset basis
     unsigned r36s_present_frames = 0;
+    uint64_t r36s_waitloop_last = 0;
     double r36s_render_ms = 0, r36s_rgb_ms = 0, r36s_swap_ms = 0;
     auto r36s_cpu_begin = std::clock();
     auto r36s_proc_read_bytes = []() -> unsigned long long {
@@ -814,6 +815,16 @@ int main(int argc, char** argv) {
                 r36s_render_ms / render_div, r36s_rgb_ms / render_div, r36s_swap_ms / render_div,
                 r36s_present_frames, static_cast<double>(read_delta) / (1024.0 * 1024.0),
                 r36s_rss_kib() / 1024.0, r36s_cpu_khz());
+            if (dcs) {
+                const uint64_t accelerated = dcs->waitloop_skipped_cycles();
+                std::fprintf(stderr,
+                    "[r36s] DSP_FAST skipped=%llu guest_instructions_this_period total=%llu\n",
+                    static_cast<unsigned long long>(
+                        accelerated >= r36s_waitloop_last ?
+                        accelerated - r36s_waitloop_last : 0ull),
+                    static_cast<unsigned long long>(accelerated));
+                r36s_waitloop_last = accelerated;
+            }
             r36s_cpu_begin = cpu_now;
             r36s_read_begin = reads_now;
             r36s_present_frames = 0;
