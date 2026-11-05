@@ -1,6 +1,10 @@
 #!/bin/bash
 # R36S / PortMaster test launcher for the native ki-recomp SDL2 player.
-set -uo pipefail
+# PortMaster/DarkOSre sources control.txt and device_info.txt. These scripts
+# legitimately inspect variables not defined by our game launcher, so Bash
+# nounset (-u) must not be enabled while they execute.
+set +u
+set -o pipefail
 PORTS="$(cd "$(dirname "$0")" && pwd)"
 GAMEDIR="$PORTS/killerinstinct"
 BIN="$GAMEDIR/ki_play.aarch64"
@@ -16,6 +20,7 @@ for folder in /opt/system/Tools/PortMaster /opt/tools/PortMaster "$XDG_DATA_HOME
   if [ -f "$folder/control.txt" ]; then controlfolder="$folder"; break; fi
 done
 if [ -n "$controlfolder" ]; then
+  echo "PortMaster control script: $controlfolder/control.txt"
   # shellcheck source=/dev/null
   source "$controlfolder/control.txt"
   if [ -n "${CFW_NAME:-}" ] && [ -f "$controlfolder/mod_${CFW_NAME}.txt" ]; then
