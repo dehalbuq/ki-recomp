@@ -401,7 +401,7 @@ class Translator:
         if n == "cache": return f"ki::cache_op(c, {i.rt}, {addr}, {pc});"
         if n in ("mfc0", "dmfc0"):
             conv = "ki::sx32(ki::lo32({}))" if n == "mfc0" else "{}"
-            return a(i.rt, conv.format(f"ki::mfc0(c, {i.rd}, {pc})"))
+            return a(i.rt, conv.format(f"ki::mfc0_recompiled(c, {i.rd}, {pc})"))
         if n in ("mtc0", "dmtc0"):
             return f"ki::mtc0(c, {i.rd}, {rt}, {pc});"
         if n == "eret":
