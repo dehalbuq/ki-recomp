@@ -282,6 +282,12 @@ if(KI_BUILD_FULL)
     target_link_libraries(ki_play PRIVATE ki_boot ki_full_code SDL2::SDL2)
     if(KI_R36S)
       target_compile_definitions(ki_play PRIVATE KI_R36S=1)
+      if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Resolve native AArch64 PC samples back to generated function names.
+        # Export symbols without changing generated guest code or game speed.
+        target_link_options(ki_play PRIVATE -rdynamic)
+        target_link_libraries(ki_play PRIVATE ${CMAKE_DL_LIBS})
+      endif()
     endif()
     if(KI_WITH_CHD)
       target_link_libraries(ki_play PRIVATE ki_files ki_hd)
