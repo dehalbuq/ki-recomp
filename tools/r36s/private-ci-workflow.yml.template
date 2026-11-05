@@ -1,0 +1,61 @@
+# Copy to .github/workflows/build-r36s.yml in a NEW PRIVATE repository.
+# The PUBLIC fork must NEVER contain the arcade game ROMs or CHD.
+# Private repo inputs: data/kinst.zip + data/kinst.chd (Git LFS).
+name: Killer Instinct R36S - PRIVATE ARM64 build
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - name: Install native ARM64 toolchain and required libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git git-lfs gcc g++ make cmake ninja-build python3-venv \
+            python3-dev pkg-config libsdl2-dev file binutils
+      - name: Checkout PRIVATE game inputs with Git LFS
+        uses: actions/checkout@v4
+        with:
+          path: private-inputs
+          lfs: true
+          persist-credentials: false
+      - name: Checkout PUBLIC source (no game data)
+        uses: actions/checkout@v4
+        with:
+          repository: dehalbuq/ki-recomp
+          ref: port/r36s-portmaster
+          path: ki-recomp
+          persist-credentials: false
+      - name: Validate and extract game files (private runner only)
+        working-directory: ki-recomp
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check rabbitizer==1.16.2
+          python3 tools/r36s/prepare_data.py \
+            "$GITHUB_WORKSPACE/private-inputs/data/kinst.zip" \
+            "$GITHUB_WORKSPACE/private-inputs/data/kinst.chd"
+      - name: Build ARM64 executable
+        working-directory: ki-recomp
+        env:
+          KI_BUILD_TYPE: Debug
+          KI_JOBS: "2"
+        run: |
+          bash tools/r36s/build.sh
+          file build-r36s/ki_play
+          readelf -h build-r36s/ki_play | grep 'Machine:.*AArch64'
+      - name: Package without original ROMs or CHD
+        working-directory: ki-recomp
+        run: |
+          python3 tools/r36s/package_port.py build-r36s/ki_play \
+            --output "$GITHUB_WORKSPACE/KI-R36S-private-debug.zip"
+      - name: Save result as PRIVATE short-lived artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KI-R36S-private-debug
+          path: KI-R36S-private-debug.zip
+          if-no-files-found: error
+          retention-days: 3
