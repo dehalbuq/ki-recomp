@@ -74,19 +74,26 @@ void KinstBoard::update(Context& c) {
     }
 }
 
+void KinstBoard::framebuffer_rgb_into(const Context& c, std::vector<uint8_t>& rgb) const {
+    // Reuse the pixel buffer on handhelds: avoid a 230 KB heap allocation per
+    // frame; preserve exact original 5->8-bit channel expansion / colors.
+    rgb.resize(320 * 240 * 3);
+    const uint32_t base = (vram_control_ & 4) ? 0x58000 : 0x30000;
+    const uint8_t* src = c.sram.data() + base;
+    uint8_t* dst = rgb.data();
+    for (size_t i = 0; i < 320u * 240u; ++i) {
+        const uint16_t v = static_cast<uint16_t>(src[2 * i] | (src[2 * i + 1] << 8));
+        const uint8_t r = static_cast<uint8_t>(v & 31);
+        const uint8_t g = static_cast<uint8_t>((v >> 5) & 31);
+        const uint8_t b = static_cast<uint8_t>((v >> 10) & 31);
+        dst[3 * i] = static_cast<uint8_t>((r << 3) | (r >> 2));
+        dst[3 * i + 1] = static_cast<uint8_t>((g << 3) | (g >> 2));
+        dst[3 * i + 2] = static_cast<uint8_t>((b << 3) | (b >> 2));
+    }
+}
 std::vector<uint8_t> KinstBoard::framebuffer_rgb(const Context& c) const {
-    std::vector<uint8_t> rgb(320 * 240 * 3);
-    uint32_t base = (vram_control_ & 4) ? 0x58000 : 0x30000;
-    for (int y = 0; y < 240; ++y)
-        for (int x = 0; x < 320; ++x) {
-            uint32_t a = base + (y * 320 + x) * 2;
-            uint16_t v = static_cast<uint16_t>(c.sram[a] | (c.sram[a + 1] << 8));
-            auto expand = [](unsigned v5) { return static_cast<uint8_t>((v5 << 3) | (v5 >> 2)); };
-            uint8_t* p = &rgb[(y * 320 + x) * 3];
-            p[0] = expand(v & 0x1f);          // BGR555: red in the low bits
-            p[1] = expand((v >> 5) & 0x1f);
-            p[2] = expand((v >> 10) & 0x1f);
-        }
+    std::vector<uint8_t> rgb;
+    framebuffer_rgb_into(c, rgb);
     return rgb;
 }
 
