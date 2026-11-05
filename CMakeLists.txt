@@ -103,6 +103,11 @@ add_executable(kinst_vblank_fast_selftest tests/kinst_vblank_fast_selftest.cpp)
 target_link_libraries(kinst_vblank_fast_selftest PRIVATE ki_runtime)
 add_test(NAME kinst_vblank_fast_selftest COMMAND kinst_vblank_fast_selftest)
 
+add_executable(mfc0_inline_selftest tests/mfc0_inline_selftest.cpp)
+target_compile_definitions(mfc0_inline_selftest PRIVATE KI_R36S_FAST_COP0=1)
+target_link_libraries(mfc0_inline_selftest PRIVATE ki_runtime)
+add_test(NAME mfc0_inline_selftest COMMAND mfc0_inline_selftest)
+
 if(KI_R36S AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_executable(host_profiler_selftest tests/host_profiler_selftest.cpp)
   target_include_directories(host_profiler_selftest PRIVATE src)
