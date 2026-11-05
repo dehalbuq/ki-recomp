@@ -36,6 +36,10 @@ public:
     // Compare optimized and original ADSP memory paths without changing the
     // sound firmware or DSP cycle timing. Defaults to fast on KI builds.
     void enable_fast_memory(bool enabled);
+    // Optional exact KI DSP polling-loop acceleration, independent from
+    // direct-memory mode; exposed for side-by-side regression testing.
+    void enable_ki_waitloop_fastpath(bool enabled);
+    uint64_t waitloop_skipped_cycles() const;
     // Diagnostic-only DSP instruction PC histogram sampled 1 in 1024.
     void enable_pc_profiling(bool enabled);
     void log_pc_hotspots(uint64_t guest_frame);
