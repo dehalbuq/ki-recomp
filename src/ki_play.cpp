@@ -54,6 +54,7 @@
 #include "ki_pad_ui.h"
 #ifdef KI_R36S
 #include "ki_r36s_menu.h"
+#include "ki_r36s_host_profiler.h"
 #endif
 #ifdef KI_HAVE_FILES
 #include "ki_files.h"
@@ -196,6 +197,7 @@ int main(int argc, char** argv) {
     const bool r36s_audio_trace = std::getenv("KI_R36S_AUDIO_TRACE") != nullptr;
     const bool r36s_dsp_hotspots = std::getenv("KI_R36S_DSP_HOTSPOTS") != nullptr;
     const bool r36s_time_dsp = std::getenv("KI_R36S_TIME_DSP") != nullptr;
+    const bool r36s_host_profile = std::getenv("KI_R36S_HOST_PROFILE") != nullptr;
     const int r36s_bench_render_every = std::getenv("KI_R36S_BENCH_RENDER_QUARTER") ? 4 : 1;
     std::fprintf(stderr, "[r36s] fullscreen 4:3 / nearest / original 58.98 Hz timing; VSync requested OFF\n");
     if (r36s_bench_no_dcs)
@@ -816,6 +818,8 @@ int main(int argc, char** argv) {
                 r36s_render_ms / render_div, r36s_rgb_ms / render_div, r36s_swap_ms / render_div,
                 r36s_present_frames, static_cast<double>(read_delta) / (1024.0 * 1024.0),
                 r36s_rss_kib() / 1024.0, r36s_cpu_khz());
+            if (r36s_host_profile)
+                ki_r36s::host_profiler::report(r36s_sample_frames);
             if (dcs && r36s_time_dsp) {
                 auto time = dcs->take_timing_sample();
                 const double dsp_wall_ms = static_cast<double>(time.host_ns) * 1.0e-6;
@@ -897,6 +901,10 @@ int main(int argc, char** argv) {
             else if (now - next_frame > std::chrono::milliseconds(100)) next_frame = now;  // fell behind: resync
         }
     };
+#ifdef KI_R36S
+    if (r36s_host_profile)
+        ki_r36s::host_profiler::start();
+#endif
     ki::schedule(c);
     bool ok = false;
     for (;;) {
@@ -910,6 +918,9 @@ int main(int argc, char** argv) {
             SDL_SetWindowTitle(window, "Killer Instinct (recompiled): state loaded");
         }
     }
+#ifdef KI_R36S
+    if (r36s_host_profile) ki_r36s::host_profiler::stop();
+#endif
     save();
     if (!ok)
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kTitle,
