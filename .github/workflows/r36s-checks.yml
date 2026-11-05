@@ -43,7 +43,7 @@ jobs:
       - name: Build guest-independent runtime self-test
         run: |
           cmake -S . -B build-ci -G Ninja -DCMAKE_BUILD_TYPE=Debug -DKI_BUILD_FULL=OFF -DKI_R36S=ON
-          cmake --build build-ci --target runtime_selftest dcs_fastmem_selftest dsp_hotspot_selftest dsp_waitloop_selftest host_profiler_selftest --parallel 2
+          cmake --build build-ci --target runtime_selftest dcs_fastmem_selftest dsp_hotspot_selftest dsp_waitloop_selftest kinst_vblank_fast_selftest host_profiler_selftest --parallel 2
           ctest --test-dir build-ci --output-on-failure -R '^(runtime_selftest|dcs_fastmem_selftest|dsp_hotspot_selftest|dsp_waitloop_selftest|host_profiler_selftest)$'
       - name: Verify GNU ld circular archive link fix without game data
         run: |
