@@ -84,6 +84,13 @@ void Dcs::reset_w(bool state) {
 }
 
 void Dcs::data_w(uint16_t data) {
+    // Optional timing trace for future HLE equivalence tests. This records
+    // the command without changing any IRQ, latch or audio behavior.
+    static const bool audio_trace = std::getenv("KI_R36S_AUDIO_TRACE") != nullptr;
+    if (audio_trace)
+        std::fprintf(stderr, "[dcs] CMD cycle=%llu value=0x%04x was_empty=%d\n",
+                     static_cast<unsigned long long>(dsp_.total_cycles()),
+                     static_cast<unsigned>(data), !!(latch_control_ & kInputEmpty));
     // MAME dcs_delayed_data_w: IRQ2 on, input latch full.
     dsp_.set_input(adsp::kIrq2, true);
     latch_control_ &= ~kInputEmpty;
