@@ -135,9 +135,16 @@ if(KI_BUILD_FULL)
   add_library(ki_full_code STATIC ${full_srcs} ${KI_OVERRIDE_SOURCES})
   target_include_directories(ki_full_code PRIVATE "${FULL_DIR}")
   ki_code_library(ki_full_code)
-  # The huge dispatch functions make -O2 very slow to compile; -O1 is enough for now.
+  # Debug used -O1 even in Release, which leaves the recompiled guest
+  # very slow on RK3326. Enable a conservative -O2 for handheld release builds.
+  # Do NOT use -ffast-math (the guest needs accurate floating-point behavior)
+  # or LTO until we have real hardware validation.
   if(NOT MSVC)
-    target_compile_options(ki_full_code PRIVATE -O1 -Wno-unused-parameter)
+    if(KI_R36S AND CMAKE_BUILD_TYPE STREQUAL "Release")
+      target_compile_options(ki_full_code PRIVATE -O2 -Wno-unused-parameter)
+    else()
+      target_compile_options(ki_full_code PRIVATE -O1 -Wno-unused-parameter)
+    endif()
   endif()
   # The boot EPROM's own code (reset vector, hardware init, the decompressor
   # that unpacks the game into DRAM), so the program can start from the
