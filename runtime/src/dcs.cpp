@@ -1,6 +1,7 @@
 #include "ki/dcs.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 
@@ -15,6 +16,7 @@ Dcs::Dcs(const std::vector<std::vector<uint8_t>>& roms)
         for (size_t j = 0; j < roms[k].size() && j < 0x100000; ++j)
             rom_[k * 0x100000 + j] = static_cast<uint16_t>(0xff00 | roms[k][j]);
     rom_banks_ = static_cast<uint32_t>(rom_.size() / 0x1000);
+    time_dsp_ = std::getenv("KI_R36S_TIME_DSP") != nullptr;
     // U64Emu speedups inspired a cheaper *interpreter* fast path, not a
     // copy of its firmware-specific HLE. Pointers stay valid for Dcs lifetime.
     const bool fast = std::getenv("KI_DCS_BASELINE_MEMORY") == nullptr;
@@ -53,6 +55,12 @@ void Dcs::enable_ki_waitloop_fastpath(bool enabled) {
 
 uint64_t Dcs::waitloop_skipped_cycles() const {
     return dsp_.ki_waitloop_skipped_cycles();
+}
+
+Dcs::TimingSample Dcs::take_timing_sample() {
+    TimingSample result = timing_;
+    timing_ = {};
+    return result;
 }
 
 void Dcs::enable_pc_profiling(bool enabled) {
@@ -170,6 +178,12 @@ void Dcs::boot() {
 // ---- scheduling --------------------------------------------------------------
 
 void Dcs::run_until(uint64_t target) {
+    // Diagnostic-only steady_clock attribution. This function is reached
+    // through several KI sound MMIO paths as well as KinstBoard::update.
+    // Guard before clock access to keep regular builds unaffected.
+    std::chrono::steady_clock::time_point begin;
+    const uint64_t before = time_dsp_ ? dsp_.total_cycles() : 0;
+    if (time_dsp_) begin = std::chrono::steady_clock::now();
     while (dsp_.total_cycles() < target) {
         uint64_t now = dsp_.total_cycles();
         uint64_t stop = target;
@@ -190,6 +204,13 @@ void Dcs::run_until(uint64_t target) {
             transfer_half_buffer();
         }
         if (timer_armed_ && now >= next_timer_) timer_fire();
+    }
+    if (time_dsp_) {
+        const auto elapsed = std::chrono::steady_clock::now() - begin;
+        timing_.host_ns += static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count());
+        timing_.guest_cycles += dsp_.total_cycles() - before;
+        ++timing_.calls;
     }
 }
 
