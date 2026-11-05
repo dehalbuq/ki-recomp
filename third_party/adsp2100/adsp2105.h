@@ -41,6 +41,20 @@ class Adsp2105 {
 public:
     explicit Adsp2105(Bus& bus);
 
+    // Optional zero-copy memory map for the KI DCS board. Direct pointers
+    // bypass the per-instruction virtual Bus calls while preserving the
+    // original 2K/2K address mirrors and I/O side effects in the fallback.
+    // The board owns the arrays; their addresses must remain stable.
+    struct DcsFastMap {
+        uint32_t* internal_pram = nullptr;  // 0x0000..0x03ff
+        uint32_t* external_pram = nullptr;  // 0x0800..0x1fff, repeated 0x800
+        uint16_t* internal_dram = nullptr;  // 0x3800..0x39ff
+        const uint16_t* sample_rom = nullptr; // 0x2000..0x2fff
+        const uint32_t* sample_bank = nullptr;
+        uint32_t sample_banks = 0;
+    };
+    void set_dcs_fast_map(DcsFastMap map) { m_dcs_fast = map; }
+
     void reset();
     // Runs at least `cycles` instructions (one cycle each), returns the number run.
     int run(int cycles);
@@ -87,6 +101,7 @@ private:
            ADSP2181_SPORT0_TX = 4, ADSP2181_TIMER = 5, ADSP2181_IRQE = 6, ADSP2181_BDMA = 7 };
 
     Bus& m_bus;
+    DcsFastMap m_dcs_fast{};
     bool m_in_reset = false;
     bool m_running = false;
     int m_slice = 0;
@@ -133,13 +148,48 @@ private:
     void shift_op(uint32_t op);
     void shift_op_imm(uint32_t op);
 
-    uint16_t data_read(uint32_t addr) { return m_bus.data_read(addr); }
-    void data_write(uint32_t addr, uint16_t data) { m_bus.data_write(addr, data); }
+    // The optional direct map exactly matches Dcs::data_read/write and
+    // Dcs::program_read/write. Other boards keep the original Bus path.
+    // The fallback is mandatory for I/O registers (input latch, timer, etc.).
+    uint16_t data_read(uint32_t addr) {
+        if (!m_dcs_fast.external_pram) return m_bus.data_read(addr);
+        addr &= 0x3fff;
+        if (addr < 0x2000) return static_cast<uint16_t>(m_dcs_fast.external_pram[addr & 0x7ff] >> 8);
+        if (addr < 0x3000)
+            return m_dcs_fast.sample_rom[
+                ((*m_dcs_fast.sample_bank % m_dcs_fast.sample_banks) << 12) | (addr & 0xfff)];
+        if (addr >= 0x3800 && addr < 0x3a00) return m_dcs_fast.internal_dram[addr - 0x3800];
+        return m_bus.data_read(addr);
+    }
+    void data_write(uint32_t addr, uint16_t value) {
+        if (!m_dcs_fast.external_pram) { m_bus.data_write(addr, value); return; }
+        addr &= 0x3fff;
+        if (addr < 0x2000) {
+            uint32_t& w = m_dcs_fast.external_pram[addr & 0x7ff];
+            w = (static_cast<uint32_t>(value) << 8) | (w & 0xff);
+        } else if (addr >= 0x3800 && addr < 0x3a00) {
+            m_dcs_fast.internal_dram[addr - 0x3800] = value;
+        } else {
+            m_bus.data_write(addr, value);
+        }
+    }
     uint16_t io_read(uint32_t) { return 0xffff; }
     void io_write(uint32_t, uint16_t) {}
-    uint32_t program_read(uint32_t addr) { return m_bus.program_read(addr); }
-    void program_write(uint32_t addr, uint32_t data) { m_bus.program_write(addr, data & 0xffffff); }
-    uint32_t opcode_read() { return m_bus.program_read(m_pc); }
+    uint32_t program_read(uint32_t addr) {
+        if (!m_dcs_fast.external_pram) return m_bus.program_read(addr);
+        addr &= 0x3fff;
+        if (addr < 0x400) return m_dcs_fast.internal_pram[addr];
+        if (addr >= 0x800 && addr < 0x2000) return m_dcs_fast.external_pram[addr & 0x7ff];
+        return 0;
+    }
+    void program_write(uint32_t addr, uint32_t value) {
+        value &= 0xffffff;
+        if (!m_dcs_fast.external_pram) { m_bus.program_write(addr, value); return; }
+        addr &= 0x3fff;
+        if (addr < 0x400) m_dcs_fast.internal_pram[addr] = value;
+        else if (addr >= 0x800 && addr < 0x2000) m_dcs_fast.external_pram[addr & 0x7ff] = value;
+    }
+    uint32_t opcode_read() { return program_read(m_pc); }
 
     inline void update_i(int which);
     inline void update_l(int which);
