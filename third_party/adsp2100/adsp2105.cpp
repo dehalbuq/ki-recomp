@@ -405,6 +405,67 @@ std::vector<std::pair<uint16_t, uint32_t>> Adsp2105::take_pc_hotspots(
     return top;
 }
 
+// KI L1.5D's DCS firmware spends most instruction cycles in two tiny
+// three-instruction register/ALU/branch polling loops. Never fast-forward
+// those based on PC alone: program RAM is writable and other ADSP firmwares
+// may execute completely different code at these addresses.
+bool Adsp2105::try_ki_waitloop()
+{
+    if (!m_ki_waitloop_fastpath || m_pc_profiler || m_icount < 3)
+        return false;
+#if ADSP_TRACK_HOTSPOTS
+    return false; // Never omit instructions when full PC tracing is enabled.
+#endif
+    const uint32_t base = m_pc;
+    if (base != 0x0130 && base != 0x0136)
+        return false;
+    // A hardware DO/UNTIL loop would alter the PC/stack at its final word.
+    // Fall back to the interpreter when one covers any of these three PCs.
+    if (m_loop >= base && m_loop <= base + 2)
+        return false;
+    const uint32_t branch = base == 0x0130 ? 0x181305u : 0x181364u;
+    // Verify all three instructions every time we enter the fast path:
+    // the DSP's instruction memory can be rewritten at runtime.
+    if (program_read(base) != 0x0d02a3u ||
+        program_read(base + 1) != 0x26e20fu ||
+        program_read(base + 2) != branch)
+        return false;
+
+    // EXACT original effects of 0d02a3: AR <- register group 2, index 3.
+    m_ppc = base;
+    m_pc = base + 1;
+    write_reg0(0x0a, read_reg2(0x03));
+
+    // EXACT original effects of 26e20f: unconditional ALU to AF.
+    m_ppc = base + 1;
+    m_pc = base + 2;
+    if (condition(0x0f))
+        alu_op_af(0x26e20fu);
+
+    // EXACT original effects of 181305/181364: conditional immediate jump
+    // to the beginning of this three-instruction block.
+    m_ppc = base + 2;
+    m_pc = base + 3;
+    const uint32_t cond = branch & 0x0fu;
+    if (condition(cond))
+        m_pc = base;
+
+    m_icount -= 3;
+    if (m_pc == base && m_icount >= 3) {
+        // No Bus I/O, timer, memory write, index change, or host callback
+        // occurs in these exact three ops. With I7/AY0 unchanged, their
+        // register/ASTAT result and branch condition repeat identically.
+        // All external DSP IRQ/DAC events are scheduled at run() boundaries
+        // by Dcs::run_until; never cross the current instruction budget.
+        const int skipped = (m_icount / 3) * 3;
+        m_icount -= skipped;
+        m_ki_waitloop_skipped_cycles += static_cast<uint64_t>(skipped);
+        // Final m_ppc remains the branch PC and m_pc remains the loop head,
+        // exactly as if the repeated blocks had run individually.
+    }
+    return true;
+}
+
 int Adsp2105::run(int cycles)
 {
 	if (m_in_reset)
@@ -425,6 +486,11 @@ int Adsp2105::run(int cycles)
 
 	do
 	{
+        // Bypass costly per-op decode for validated, side-effect-free DCS
+        // polling loops; the normal interpreter handles every other opcode
+        // and all partial (1-2 instruction) tails.
+        if (try_ki_waitloop())
+            continue;
 		// debugging
 		m_ppc = m_pc;   // copy PC to previous PC
 
