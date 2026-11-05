@@ -18,13 +18,22 @@ KinstBoard::KinstBoard(std::vector<uint8_t> disk, std::vector<uint8_t> boot_rom)
     : disk_(std::move(disk)), rom_(std::move(boot_rom)) {
     build_identify();
     ide_reset();
+#ifdef KI_R36S_FAST_DSP
+    fast_vblank_irq_ = std::getenv("KI_R36S_VBLANK_BASELINE") == nullptr;
+#endif
 }
 
 // ---- timing / interrupt lines ------------------------------------------------
 
 uint32_t KinstBoard::interrupt_lines(Context& c) {
     uint32_t lines = 0;
-    if ((c.cycles + phase_) % kCyclesPerFrame >= kVblankStart) lines |= 0x400;  // Int0: VBLANK (screen_vblank)
+    // While the scheduler is before next_vblank_, use a cheap deadline
+    // comparison instead of modulo in the hot COP0 Cause polling loop.
+    // Fall back to the original formula if the board event is overdue.
+    const bool vblank = fast_vblank_irq_ && c.cycles < next_vblank_
+        ? (next_vblank_ - c.cycles > kVblankStart)
+        : ((c.cycles + phase_) % kCyclesPerFrame >= kVblankStart);
+    if (vblank) lines |= 0x400;  // Int0: VBLANK (screen_vblank)
     if (irq_) lines |= 0x800;                                        // Int1: IDE
     return lines;
 }
