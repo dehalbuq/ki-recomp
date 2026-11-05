@@ -195,6 +195,7 @@ int main(int argc, char** argv) {
     const bool r36s_bench_no_dcs = std::getenv("KI_R36S_BENCH_NO_DCS") != nullptr;
     const bool r36s_audio_trace = std::getenv("KI_R36S_AUDIO_TRACE") != nullptr;
     const bool r36s_dsp_hotspots = std::getenv("KI_R36S_DSP_HOTSPOTS") != nullptr;
+    const bool r36s_time_dsp = std::getenv("KI_R36S_TIME_DSP") != nullptr;
     const int r36s_bench_render_every = std::getenv("KI_R36S_BENCH_RENDER_QUARTER") ? 4 : 1;
     std::fprintf(stderr, "[r36s] fullscreen 4:3 / nearest / original 58.98 Hz timing; VSync requested OFF\n");
     if (r36s_bench_no_dcs)
@@ -815,6 +816,20 @@ int main(int argc, char** argv) {
                 r36s_render_ms / render_div, r36s_rgb_ms / render_div, r36s_swap_ms / render_div,
                 r36s_present_frames, static_cast<double>(read_delta) / (1024.0 * 1024.0),
                 r36s_rss_kib() / 1024.0, r36s_cpu_khz());
+            if (dcs && r36s_time_dsp) {
+                auto time = dcs->take_timing_sample();
+                const double dsp_wall_ms = static_cast<double>(time.host_ns) * 1.0e-6;
+                const double per_guest_frame = r36s_sample_frames ?
+                    dsp_wall_ms / static_cast<double>(r36s_sample_frames) : 0.0;
+                const double dsp_wall_pct = secs > 0 ?
+                    (dsp_wall_ms / (secs * 1000.0)) * 100.0 : 0.0;
+                std::fprintf(stderr,
+                    "[r36s] PHASE dsp_wall=%.1fms dsp_per_frame=%.2fms "
+                    "dsp_wall_pct=%.1f%% run_calls=%llu guest_cycles=%llu\n",
+                    dsp_wall_ms, per_guest_frame, dsp_wall_pct,
+                    static_cast<unsigned long long>(time.calls),
+                    static_cast<unsigned long long>(time.guest_cycles));
+            }
             if (dcs) {
                 const uint64_t accelerated = dcs->waitloop_skipped_cycles();
                 std::fprintf(stderr,
