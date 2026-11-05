@@ -193,6 +193,7 @@ int main(int argc, char** argv) {
     // the existing guest 58.98 Hz frame pacer, so game speed does not increase.
     SDL_SetHintWithPriority(SDL_HINT_RENDER_VSYNC, "0", SDL_HINT_OVERRIDE);
     const bool r36s_bench_no_dcs = std::getenv("KI_R36S_BENCH_NO_DCS") != nullptr;
+    const bool r36s_audio_trace = std::getenv("KI_R36S_AUDIO_TRACE") != nullptr;
     const int r36s_bench_render_every = std::getenv("KI_R36S_BENCH_RENDER_QUARTER") ? 4 : 1;
     std::fprintf(stderr, "[r36s] fullscreen 4:3 / nearest / original 58.98 Hz timing; VSync requested OFF\n");
     if (r36s_bench_no_dcs)
@@ -433,6 +434,10 @@ int main(int argc, char** argv) {
     Uint32 r36s_menu_action_ms = 0;
     auto r36s_sample_start = std::chrono::steady_clock::now();
     unsigned r36s_sample_frames = 0;
+    // Optional deterministic PCM trace for interpreter vs future KI HLE tests.
+    // Only enabled in a diagnostic launcher; zero per-sample cost normally.
+    uint64_t r36s_audio_samples = 0;
+    uint64_t r36s_audio_hash = 14695981039346656037ull; // FNV-1a 64-bit offset basis
     unsigned r36s_present_frames = 0;
     double r36s_render_ms = 0, r36s_rgb_ms = 0, r36s_swap_ms = 0;
     auto r36s_cpu_begin = std::clock();
@@ -818,6 +823,26 @@ int main(int argc, char** argv) {
 
         if (dcs) {
             std::vector<int16_t>& pcm = dcs->samples();
+#ifdef KI_R36S
+            if (r36s_audio_trace) {
+                // Hash PCM bytes in little-endian sample order, so the log can
+                // be compared at equal guest frame numbers across engines.
+                for (int16_t sample : pcm) {
+                    const uint16_t bits = static_cast<uint16_t>(sample);
+                    r36s_audio_hash = (r36s_audio_hash ^ (bits & 0xffu)) * 1099511628211ull;
+                    r36s_audio_hash = (r36s_audio_hash ^ (bits >> 8)) * 1099511628211ull;
+                }
+                r36s_audio_samples += pcm.size();
+                if (frame % 300 == 0) {
+                    std::fprintf(stderr,
+                        "[r36s] DCS_PCM frame=%llu samples=%llu fnv64=%016llx sample_rate=%.1f\n",
+                        static_cast<unsigned long long>(frame),
+                        static_cast<unsigned long long>(r36s_audio_samples),
+                        static_cast<unsigned long long>(r36s_audio_hash),
+                        dcs->sample_rate());
+                }
+            }
+#endif
             // Drop audio in turbo mode, or if the queue backs up past 200 ms.
             if (audio && !turbo && SDL_GetQueuedAudioSize(audio) < 31250 * 2 / 5)
                 SDL_QueueAudio(audio, pcm.data(), static_cast<Uint32>(pcm.size() * sizeof(int16_t)));
