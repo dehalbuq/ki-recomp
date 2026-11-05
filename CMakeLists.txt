@@ -34,6 +34,11 @@ endif()
 add_library(ki_runtime STATIC runtime/src/runtime.cpp runtime/src/kinst_board.cpp runtime/src/dcs.cpp)
 target_include_directories(ki_runtime PUBLIC runtime/include)
 target_link_libraries(ki_runtime PUBLIC adsp2105)
+if(KI_R36S)
+  # Only handheld builds enable KI-specific DSP polling acceleration by
+  # default. Other platforms keep the interpreter until validated.
+  target_compile_definitions(ki_runtime PRIVATE KI_R36S_FAST_DSP=1)
+endif()
 
 # A recompiled-code library defines the function table (ki::kFunctionTable) that
 # the runtime looks entries up in, so the two static libraries depend on each
