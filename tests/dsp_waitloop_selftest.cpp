@@ -27,15 +27,22 @@ static bool same(const adsp::Adsp2105& a, const adsp::Adsp2105& b) {
     return true;
 }
 
-static int run_case(uint32_t head, uint32_t i7) {
+static int run_case(uint32_t head, uint32_t i7, uint32_t ay0) {
     TestBus bus;
-    bus.prog[0] = (0x18u << 16) | (head << 4) | 0x0fu;
+    // A one-instruction setup copies I7 -> AY0 via the ordinary ADSP
+    // internal-register move before entering either polling loop.
+    bus.prog[0] = 0x0d0243u;
+    bus.prog[1] = (0x18u << 16) | (head << 4) | 0x0fu;
     bus.prog[head] = 0x0d02a3u;
     bus.prog[head + 1] = 0x26e20fu;
     bus.prog[head + 2] = head == 0x130 ? 0x181305u : 0x181364u;
     adsp::Adsp2105 base(bus), fast(bus);
     base.reset();
     fast.reset();
+    base.set_ireg(7, ay0);
+    fast.set_ireg(7, ay0);
+    base.run(1);   // AY0 <- I7 (distinct setup value)
+    fast.run(1);
     base.set_ireg(7, i7);
     fast.set_ireg(7, i7);
     fast.enable_ki_waitloop_fastpath(true);
@@ -63,7 +70,8 @@ static int run_case(uint32_t head, uint32_t i7) {
         std::fputs("Expected positive accelerated cycles for zero/loop130\n", stderr);
         return 2;
     }
-    if (head == 0x136 && i7 == 0x8000 && fast.ki_waitloop_skipped_cycles() == 0) {
+    if (head == 0x136 && i7 == 0 && ay0 == 0x1000 &&
+        fast.ki_waitloop_skipped_cycles() == 0) {
         std::fputs("Expected positive accelerated cycles for negative/loop136\n", stderr);
         return 3;
     }
@@ -71,10 +79,14 @@ static int run_case(uint32_t head, uint32_t i7) {
 }
 
 int main() {
-    const std::array<uint32_t,3> vals = {0, 1, 0x8000};
-    for (uint32_t pc : {0x130u, 0x136u})
-        for (uint32_t i7 : vals)
-            if (run_case(pc, i7)) return 1;
+    // 0x0130 loops when AR - AY0 is nonnegative (condition 5),
+    // 0x0136 loops when AR - AY0 is negative (condition 4).
+    if (run_case(0x130, 0, 0)) return 1;
+    if (run_case(0x130, 0x1000, 0)) return 2;
+    if (run_case(0x130, 0, 0x1000)) return 3;  // untaken case
+    if (run_case(0x136, 0, 0x1000)) return 4;
+    if (run_case(0x136, 0, 0)) return 5;       // untaken case
+    if (run_case(0x136, 0x1000, 0)) return 6;  // untaken case
     std::puts("KI DSP polling microblock: verified cycle/state equivalence and fast forwarding");
     return 0;
 }
