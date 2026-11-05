@@ -10,7 +10,12 @@
 // Only the ADSP-2101 family behaviour (ADSP-2105 configuration) is kept.
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <utility>
+#include <vector>
 
 #define LSB_FIRST 1
 
@@ -58,6 +63,12 @@ public:
     void reset();
     // Runs at least `cycles` instructions (one cycle each), returns the number run.
     int run(int cycles);
+    // Diagnostic only: sample one of every 1024 executed instructions.
+    // Memory is allocated only when profiling is explicitly enabled.
+    // This does not change emulated DSP cycles or instruction semantics.
+    void enable_pc_profiling(bool enable);
+    std::vector<std::pair<uint16_t, uint32_t>> take_pc_hotspots(
+        std::size_t max_entries, uint32_t& sampled_instructions);
     // Interrupt input level (MAME execute_set_input semantics: a rising edge latches).
     void set_input(int line, bool asserted);
     // Holds the core in reset while asserted; releasing it resets the core.
@@ -102,6 +113,12 @@ private:
 
     Bus& m_bus;
     DcsFastMap m_dcs_fast{};
+    struct PcProfiler {
+        std::array<uint32_t, 0x4000> counts{};
+        uint32_t counter = 0;
+        uint32_t sampled = 0;
+    };
+    std::unique_ptr<PcProfiler> m_pc_profiler;
     bool m_in_reset = false;
     bool m_running = false;
     int m_slice = 0;
