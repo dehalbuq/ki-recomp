@@ -85,6 +85,9 @@ struct Context {
     std::vector<uint8_t> sram = std::vector<uint8_t>(kSramSize);
     std::vector<uint8_t> dram = std::vector<uint8_t>(kDramSize);
     IoHandler* io = nullptr;
+    // R36S-only opt-in fast COP0 reads. The original mfc0() remains available
+    // for side-by-side hardware comparison and every other platform.
+    bool fast_cop0 = false;
 };
 
 // Raised for guest exceptions. Exception delivery to the guest's own vector is
@@ -321,6 +324,26 @@ void schedule(Context& c);  // recompute next_event after state changes
 void eret(Context& c);
 
 uint64_t mfc0(Context& c, unsigned reg, uint32_t pc);
+// The statically generated KI translation calls this wrapper. On R36S
+// Release, the most frequent COP0 reads can be inlined at their call sites
+// (reg is a compile-time constant), removing a cross-translation-unit call
+// and reg switch. All semantics match mfc0(); no guest cycles are changed.
+inline uint64_t mfc0_recompiled(Context& c, unsigned reg, uint32_t pc) {
+#ifdef KI_R36S_FAST_COP0
+    if (c.fast_cop0) {
+        if (reg == kCp0Cause) {
+            uint32_t cause = lo32(c.cp0[kCp0Cause]) & ~0x7c00u;
+            if (c.io) cause |= c.io->interrupt_lines(c) & 0x7c00u;
+            return cause;
+        }
+        if (reg == kCp0Count)
+            return static_cast<uint32_t>(c.count_base + c.cycles / 2);
+        if (reg == kCp0PRId) return 0x2020;
+        return c.cp0[reg & 31];
+    }
+#endif
+    return mfc0(c, reg, pc);
+}
 void mtc0(Context& c, unsigned reg, uint64_t value, uint32_t pc);
 void cop0_op(Context& c, uint32_t instr, uint32_t pc);  // tlbwi, tlbr, eret, ...
 void cache_op(Context& c, unsigned op, uint32_t vaddr, uint32_t pc);
