@@ -21,11 +21,50 @@ args=(-S "$ROOT" -B "$ROOT/build-r36s" -G Ninja
   -DKI_R36S=ON -DKI_BUILD_FULL=ON -DKI_BUILD_TRACE=OFF -DKI_WITH_CHD=ON
   -DKI_SPLIT=32 "-DKI_PYTHON=$PYTHON_BIN")
 
-if [ -n "${KI_CXX:-}" ]; then
-  args+=("-DCMAKE_CXX_COMPILER=$KI_CXX")
-elif [ "$(uname -m)" != "aarch64" ]; then
-  command -v aarch64-linux-gnu-g++ >/dev/null || { echo "Missing aarch64-linux-gnu-g++" >&2; exit 2; }
-  args+=("-DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++")
+# Both C and C++ MUST target AArch64. Otherwise libchdr's C objects end
+# up as x86_64 (EM=62) and the AArch64 linker fails with "file in wrong format".
+if [ "$(uname -m)" = "aarch64" ]; then
+  CC_TARGET="${KI_CC:-cc}"
+  CXX_TARGET="${KI_CXX:-c++}"
+else
+  CC_TARGET="${KI_CC:-aarch64-linux-gnu-gcc}"
+  CXX_TARGET="${KI_CXX:-aarch64-linux-gnu-g++}"
+  args+=(-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64)
+fi
+
+for compiler in "$CC_TARGET" "$CXX_TARGET"; do
+  if ! command -v "$compiler" >/dev/null 2>&1; then
+    echo "Missing compiler: $compiler" >&2
+    echo "On Kali: sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu" >&2
+    exit 2
+  fi
+  if [[ "$("$compiler" -dumpmachine)" != aarch64* ]]; then
+    echo "Wrong target for $compiler: $("$compiler" -dumpmachine) (expected AArch64)" >&2
+    exit 2
+  fi
+done
+CC_PATH="$(command -v "$CC_TARGET")"
+CXX_PATH="$(command -v "$CXX_TARGET")"
+args+=("-DCMAKE_C_COMPILER=$CC_PATH" "-DCMAKE_CXX_COMPILER=$CXX_PATH")
+echo "Using C compiler: $CC_PATH ($("$CC_TARGET" -dumpmachine))"
+echo "Using C++ compiler: $CXX_PATH ($("$CXX_TARGET" -dumpmachine))"
+
+# CMake cannot safely switch compilers in an existing build tree. Detect the
+# first (broken) x86_64 CMake cache rather than repeatedly failing at link.
+CACHE="$ROOT/build-r36s/CMakeCache.txt"
+if [ -f "$CACHE" ]; then
+  for kind in C CXX; do
+    key="CMAKE_${kind}_COMPILER"
+    cached="$(sed -n "s/^${key}:[^=]*=//p" "$CACHE" | head -n 1)"
+    if [ "$kind" = C ]; then desired="$CC_PATH"; else desired="$CXX_PATH"; fi
+    if [ -n "$cached" ] && [ "$(readlink -f "$cached")" != "$(readlink -f "$desired")" ]; then
+      echo "Incompatible existing CMake cache: $key=$cached" >&2
+      echo "Expected: $desired" >&2
+      echo "Fix (only removes generated objects): rm -rf build-r36s" >&2
+      echo "Then run: bash tools/r36s/build.sh" >&2
+      exit 3
+    fi
+  done
 fi
 
 if [ -n "${KI_SYSROOT:-}" ]; then
