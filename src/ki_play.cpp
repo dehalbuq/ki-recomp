@@ -51,6 +51,9 @@
 #include "ki_fight.h"
 #include "ki_pad.h"
 #include "ki_pad_ui.h"
+#ifdef KI_R36S
+#include "ki_r36s_menu.h"
+#endif
 #ifdef KI_HAVE_FILES
 #include "ki_files.h"
 #endif
@@ -372,6 +375,36 @@ int main(int argc, char** argv) {
 
     bool turbo = false;
     std::vector<SDL_GameController*> pads;  // opened as SDL reports them (SDL_CONTROLLERDEVICEADDED)
+#ifdef KI_R36S
+    // Some DarkOSre builds expose the internal pad as a raw joystick rather
+    // than a mapped SDL_GameController. Read Start=13 and Select=12 directly.
+    std::vector<SDL_Joystick*> raw_joysticks;
+    auto open_raw = [&](int device_index) {
+        if (device_index < 0 || device_index >= SDL_NumJoysticks()) return;
+        SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(device_index);
+        for (SDL_Joystick* j : raw_joysticks)
+            if (j && SDL_JoystickInstanceID(j) == id) return;
+        SDL_Joystick* joy = SDL_JoystickOpen(device_index);
+        if (joy) {
+            raw_joysticks.push_back(joy);
+            std::fprintf(stderr, "[r36s] joystick '%s', buttons=%d, instance=%d\n",
+                         SDL_JoystickName(joy), SDL_JoystickNumButtons(joy), static_cast<int>(id));
+        }
+    };
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+        open_raw(i);
+        if (SDL_IsGameController(i)) {
+            if (SDL_GameController* pad = SDL_GameControllerOpen(i)) pads.push_back(pad);
+        }
+    }
+    std::fprintf(stderr, "[r36s] detected %d joystick device(s), %zu game controller(s)\n",
+                 SDL_NumJoysticks(), pads.size());
+    bool r36s_menu_open = false;
+    int r36s_menu_choice = 0;
+    Uint32 r36s_menu_action_ms = 0;
+    auto r36s_sample_start = std::chrono::steady_clock::now();
+    unsigned r36s_sample_frames = 0;
+#endif
     uint64_t saved_writes = 0;
     uint64_t title_reset_frame = 0;
     auto save = [&]() {
@@ -456,11 +489,18 @@ int main(int argc, char** argv) {
         SDL_RenderSetViewport(renderer, &area);
         pad_setup.draw(renderer, pads);
         SDL_RenderSetViewport(renderer, nullptr);
+#ifdef KI_R36S
+        if (r36s_menu_open) ki_r36s::draw(renderer, r36s_menu_choice);
+#endif
         SDL_RenderPresent(renderer);
     };
     board.on_vblank = [&](ki::Context& ctx, uint64_t frame) {
         SDL_Event ev;
-        for (bool first = true; first || paused || pad_setup.open(); first = false) {
+        for (bool first = true; first || paused || pad_setup.open()
+#ifdef KI_R36S
+             || r36s_menu_open
+#endif
+             ; first = false) {
             if (!first) {
                 // Paused: the frame stays on screen (H still switches HD, to compare), the game does not run.
                 present(ctx);
@@ -468,6 +508,69 @@ int main(int argc, char** argv) {
                 next_frame = std::chrono::steady_clock::now();
             }
             while (SDL_PollEvent(&ev)) {
+#ifdef KI_R36S
+                if (ev.type == SDL_JOYDEVICEADDED) open_raw(ev.jdevice.which);
+                if (ev.type == SDL_JOYDEVICEREMOVED) {
+                    for (SDL_Joystick*& joy : raw_joysticks)
+                        if (joy && SDL_JoystickInstanceID(joy) == ev.jdevice.which) {
+                            SDL_JoystickClose(joy);
+                            joy = nullptr;
+                        }
+                    raw_joysticks.erase(std::remove(raw_joysticks.begin(), raw_joysticks.end(), nullptr),
+                                        raw_joysticks.end());
+                }
+                if (ev.type == SDL_KEYDOWN && !ev.key.repeat &&
+                    ev.key.keysym.scancode == SDL_SCANCODE_F10 && !r36s_menu_open) {
+                    r36s_menu_open = true;
+                    r36s_menu_choice = 0;
+                    if (audio) SDL_PauseAudioDevice(audio, 1);
+                    std::fprintf(stderr, "[r36s] exit menu opened with F10\n");
+                    continue;
+                }
+                if (r36s_menu_open) {
+                    if (ev.type == SDL_QUIT) {
+                        save();
+                        if (audio) SDL_CloseAudioDevice(audio);
+                        SDL_Quit();
+                        std::exit(0);
+                    }
+                    int action = -1; // 0 up, 1 down, 2 accept, 3 cancel
+                    if (ev.type == SDL_JOYBUTTONDOWN) {
+                        if (ev.jbutton.button == 8) action = 0;
+                        if (ev.jbutton.button == 9) action = 1;
+                        if (ev.jbutton.button == 1) action = 2;
+                        if (ev.jbutton.button == 0) action = 3;
+                    } else if (ev.type == SDL_CONTROLLERBUTTONDOWN) {
+                        if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_UP) action = 0;
+                        if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_DOWN) action = 1;
+                        if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_A) action = 2;
+                        if (ev.cbutton.button == SDL_CONTROLLER_BUTTON_B) action = 3;
+                    } else if (ev.type == SDL_KEYDOWN && !ev.key.repeat) {
+                        SDL_Scancode sc = ev.key.keysym.scancode;
+                        if (sc == SDL_SCANCODE_UP) action = 0;
+                        if (sc == SDL_SCANCODE_DOWN) action = 1;
+                        if (sc == SDL_SCANCODE_RETURN || sc == SDL_SCANCODE_SPACE) action = 2;
+                        if (sc == SDL_SCANCODE_ESCAPE || sc == SDL_SCANCODE_F10) action = 3;
+                    }
+                    if (action >= 0 && SDL_GetTicks() - r36s_menu_action_ms > 150) {
+                        r36s_menu_action_ms = SDL_GetTicks();
+                        if (action == 0) r36s_menu_choice = 0;
+                        if (action == 1) r36s_menu_choice = 1;
+                        if (action == 3 || (action == 2 && r36s_menu_choice == 0)) {
+                            r36s_menu_open = false;
+                            if (audio && !paused) SDL_PauseAudioDevice(audio, 0);
+                            std::fprintf(stderr, "[r36s] resume game\n");
+                        } else if (action == 2 && r36s_menu_choice == 1) {
+                            std::fprintf(stderr, "[r36s] exit selected; flushing save\n");
+                            save();
+                            if (audio) SDL_CloseAudioDevice(audio);
+                            SDL_Quit();
+                            std::exit(0);
+                        }
+                    }
+                    continue; // do not inject menu button presses into arcade controls
+                }
+#endif
                 if (ev.type == SDL_CONTROLLERDEVICEADDED || ev.type == SDL_CONTROLLERDEVICEREMOVED || ev.type == SDL_QUIT) {
                     // handled below even while the setup screen is open
                 } else if (pad_setup.handle(ev)) {
@@ -538,7 +641,13 @@ int main(int argc, char** argv) {
                 if (ev.type == SDL_KEYDOWN && !ev.key.repeat && ev.key.keysym.scancode == SDL_SCANCODE_F9 && state.valid())
                     throw ki::LoadStateRequest{};
                 if (ev.type == SDL_CONTROLLERDEVICEADDED) {
-                    if (SDL_GameController* pad = SDL_GameControllerOpen(ev.cdevice.which)) pads.push_back(pad);
+                    SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(ev.cdevice.which);
+                    bool already_open = false;
+                    for (SDL_GameController* p : pads)
+                        if (p && SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(p)) == id)
+                            already_open = true;
+                    if (!already_open)
+                        if (SDL_GameController* pad = SDL_GameControllerOpen(ev.cdevice.which)) pads.push_back(pad);
                 }
                 if (ev.type == SDL_CONTROLLERDEVICEREMOVED) {
                     for (SDL_GameController*& pad : pads)
@@ -567,9 +676,18 @@ int main(int argc, char** argv) {
         for (SDL_GameController* pad : pads)
             if (pad && SDL_GameControllerGetAttached(pad) && player < 2) (player++ == 0 ? p1 : p2) &= ~ki::pad::pressed(pad, pad_actions);
 #ifdef KI_R36S
-        // Hold Start+Select/Back for >= 1200 ms to exit safely.
+        // Hold Start+Select for 800ms to open an actual on-screen exit menu.
+        // Read raw R36S buttons (Select=12, Start=13) even if SDL has no
+        // GameController mapping for this firmware.
         static Uint32 quit_combo_since = 0;
         bool quit_combo = false;
+        for (SDL_Joystick* joy : raw_joysticks) {
+            if (!joy || !SDL_JoystickGetAttached(joy) || SDL_JoystickNumButtons(joy) <= 13) continue;
+            if (SDL_JoystickGetButton(joy, 12) && SDL_JoystickGetButton(joy, 13)) {
+                quit_combo = true;
+                break;
+            }
+        }
         for (SDL_GameController* pad : pads) {
             if (!pad || !SDL_GameControllerGetAttached(pad)) continue;
             const bool start = SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_START);
@@ -577,16 +695,26 @@ int main(int argc, char** argv) {
                                 SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_GUIDE);
             if (start && select) { quit_combo = true; break; }
         }
-        if (quit_combo) {
+        if (!r36s_menu_open && quit_combo) {
             if (!quit_combo_since) quit_combo_since = SDL_GetTicks();
-            else if (SDL_TICKS_PASSED(SDL_GetTicks(), quit_combo_since + 1200u)) {
-                std::fprintf(stderr, "[r36s] Start+Select: exiting\n");
-                save();
-                SDL_Quit();
-                std::exit(0);
+            else if (SDL_TICKS_PASSED(SDL_GetTicks(), quit_combo_since + 800u)) {
+                r36s_menu_open = true;
+                r36s_menu_choice = 0;
+                if (audio) SDL_PauseAudioDevice(audio, 1);
+                std::fprintf(stderr, "[r36s] Start+Select: exit menu opened\n");
             }
         } else {
             quit_combo_since = 0;
+        }
+        ++r36s_sample_frames;
+        auto stamp = std::chrono::steady_clock::now();
+        double secs = std::chrono::duration<double>(stamp - r36s_sample_start).count();
+        if (secs >= 5.0) {
+            std::fprintf(stderr, "[r36s] guest vblank rate: %.1f fps (frames=%u, %.1fs); audio queued=%u bytes\n",
+                         r36s_sample_frames / secs, r36s_sample_frames, secs,
+                         audio ? SDL_GetQueuedAudioSize(audio) : 0u);
+            r36s_sample_frames = 0;
+            r36s_sample_start = stamp;
         }
 #endif
         board.p1 = p1;
