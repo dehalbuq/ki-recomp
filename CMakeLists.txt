@@ -80,6 +80,11 @@ target_link_libraries(runtime_selftest PRIVATE ki_runtime)
 
 enable_testing()
 add_test(NAME runtime_selftest COMMAND runtime_selftest)
+
+# ROM-free differential verification of the ADSP2105 fast bus map.
+add_executable(dcs_fastmem_selftest tests/dcs_fastmem_selftest.cpp)
+target_link_libraries(dcs_fastmem_selftest PRIVATE ki_runtime)
+add_test(NAME dcs_fastmem_selftest COMMAND dcs_fastmem_selftest)
 file(GLOB _cases LIST_DIRECTORIES true "${CMAKE_SOURCE_DIR}/traces/poc/*")
 foreach(case_dir IN LISTS _cases)
   if(IS_DIRECTORY "${case_dir}" AND EXISTS "${case_dir}/exit_regs.txt")
