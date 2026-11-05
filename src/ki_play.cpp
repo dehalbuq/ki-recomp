@@ -364,6 +364,11 @@ int main(int argc, char** argv) {
     // --boot rom (and player mode): start at the reset vector, like the real board.
     const bool cold = !dev || boot == "rom";
     uint32_t entry = cold ? ki::cold_reset(c) : ki::load_boot_state(c, boot);
+#ifdef KI_R36S
+    c.fast_cop0 = std::getenv("KI_R36S_COP0_BASELINE") == nullptr;
+    std::fprintf(stderr, "[r36s] COP0 MFC0 inlining: %s\n",
+                 c.fast_cop0 ? "ON" : "OFF (baseline)");
+#endif
     static ki::KinstBoard board(std::move(disk_image), std::move(boot_rom));
     c.io = &board;
     if (cold) board.set_cycles_to_vblank(0);
