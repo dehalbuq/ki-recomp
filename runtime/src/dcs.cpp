@@ -20,6 +20,14 @@ Dcs::Dcs(const std::vector<std::vector<uint8_t>>& roms)
     const bool fast = std::getenv("KI_DCS_BASELINE_MEMORY") == nullptr;
     enable_fast_memory(fast);
     std::fprintf(stderr, "[dcs] ADSP2105 memory path: %s\n", fast ? "direct-map (fast)" : "virtual Bus (baseline)");
+#ifdef KI_R36S_FAST_DSP
+    const bool fast_loop = std::getenv("KI_DCS_BASELINE_HOTLOOP") == nullptr;
+#else
+    const bool fast_loop = false;
+#endif
+    enable_ki_waitloop_fastpath(fast_loop);
+    std::fprintf(stderr, "[dcs] ADSP2105 KI verified waitloop accelerator: %s\n",
+                 fast_loop ? "ON" : "OFF");
     board_reset();
     dsp_.reset();
 }
@@ -37,6 +45,14 @@ void Dcs::enable_fast_memory(bool enabled) {
     map.sample_bank = &bank_;
     map.sample_banks = rom_banks_;
     dsp_.set_dcs_fast_map(map);
+}
+
+void Dcs::enable_ki_waitloop_fastpath(bool enabled) {
+    dsp_.enable_ki_waitloop_fastpath(enabled);
+}
+
+uint64_t Dcs::waitloop_skipped_cycles() const {
+    return dsp_.ki_waitloop_skipped_cycles();
 }
 
 void Dcs::enable_pc_profiling(bool enabled) {
