@@ -55,8 +55,9 @@ void Dcs::log_pc_hotspots(uint64_t guest_frame) {
     for (std::size_t i = 0; i < hotspots.size(); ++i) {
         const auto& hot = hotspots[i];
         const double percent = sampled ? (100.0 * hot.second / sampled) : 0.0;
-        std::fprintf(stderr, "%s%04x:%u(%.1f%%)",
+        std::fprintf(stderr, "%s%04x/%06x:%u(%.1f%%)",
                      i ? "," : "", static_cast<unsigned>(hot.first),
+                     static_cast<unsigned>(program_read(hot.first) & 0xffffffu),
                      hot.second, percent);
     }
     std::fprintf(stderr, "\n");
