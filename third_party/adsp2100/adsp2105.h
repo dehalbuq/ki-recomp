@@ -67,6 +67,11 @@ public:
     // Memory is allocated only when profiling is explicitly enabled.
     // This does not change emulated DSP cycles or instruction semantics.
     void enable_pc_profiling(bool enable);
+    // KI L1.5D DSP polling-loop accelerator. Executes a verified 3-op block,
+    // then skips identical pure repeats to the end of the current DSP slice.
+    // All skipped cycles remain accounted for; original interpreter is fallback.
+    void enable_ki_waitloop_fastpath(bool enabled) { m_ki_waitloop_fastpath = enabled; }
+    uint64_t ki_waitloop_skipped_cycles() const { return m_ki_waitloop_skipped_cycles; }
     std::vector<std::pair<uint16_t, uint32_t>> take_pc_hotspots(
         std::size_t max_entries, uint32_t& sampled_instructions);
     // Interrupt input level (MAME execute_set_input semantics: a rising edge latches).
@@ -113,6 +118,9 @@ private:
 
     Bus& m_bus;
     DcsFastMap m_dcs_fast{};
+    bool m_ki_waitloop_fastpath = false;
+    uint64_t m_ki_waitloop_skipped_cycles = 0;
+    bool try_ki_waitloop();
     struct PcProfiler {
         std::array<uint32_t, 0x4000> counts{};
         uint32_t counter = 0;
