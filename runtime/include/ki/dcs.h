@@ -33,6 +33,9 @@ public:
 
     // Runs the DSP up to `dsp_cycles` (10 MHz cycles since power-on).
     void run_until(uint64_t dsp_cycles);
+    // Compare optimized and original ADSP memory paths without changing the
+    // sound firmware or DSP cycle timing. Defaults to fast on KI builds.
+    void enable_fast_memory(bool enabled);
     uint64_t cycles() const { return dsp_.total_cycles(); }
     uint32_t dsp_pc() const { return dsp_.pc(); }
 
