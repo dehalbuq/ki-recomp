@@ -99,6 +99,10 @@ add_executable(dsp_waitloop_selftest tests/dsp_waitloop_selftest.cpp)
 target_link_libraries(dsp_waitloop_selftest PRIVATE adsp2105)
 add_test(NAME dsp_waitloop_selftest COMMAND dsp_waitloop_selftest)
 
+add_executable(kinst_vblank_fast_selftest tests/kinst_vblank_fast_selftest.cpp)
+target_link_libraries(kinst_vblank_fast_selftest PRIVATE ki_runtime)
+add_test(NAME kinst_vblank_fast_selftest COMMAND kinst_vblank_fast_selftest)
+
 if(KI_R36S AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_executable(host_profiler_selftest tests/host_profiler_selftest.cpp)
   target_include_directories(host_profiler_selftest PRIVATE src)
