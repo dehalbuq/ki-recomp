@@ -87,6 +87,15 @@ background routines), `hleScrollBlock`, `hleBackground2`,
   it is not an estimate of full-game gains on Cortex-A35.
 - **Prioritize measuring actual MIPS call hotspots first**. Avoid
   blindly overriding a function that seldom runs.
+- The current `CMakeLists.txt` already supports the `--override` path
+  (`KI_OVERRIDES`) and provides `func_<address>_original` as a
+  fallback. Candidate hooks are already wrapped in
+  `src/overrides/sprites.cpp` (including stage rendering
+  `func_88030b9c`, setup `func_8803108c`) and
+  `src/overrides/fight.cpp`. This lets us add **verified** native
+  background/copy specializations without changing the translator's
+  function-discovery algorithm. Do not assume old Ultra64Emu PC addresses
+  correspond directly to those recompilation entry points.
 
 ### P1 — Fast guest RAM access and page-based specialization
 
