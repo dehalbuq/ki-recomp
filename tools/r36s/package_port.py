@@ -48,7 +48,10 @@ with tempfile.TemporaryDirectory(prefix="ki-r36s-port-") as td:
     )
     if args.libs:
         shutil.copytree(args.libs, folder / "libs.aarch64")
-    os.chmod(dest / "Killer Instinct Arcade.sh", 0o755)
+    # All standalone PortMaster benchmark entries are launchable scripts,
+    # not just the main game entry.
+    for launcher in dest.glob("*.sh"):
+        os.chmod(launcher, 0o755)
     os.chmod(folder / "ki_play.aarch64", 0o755)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(args.output, "w", compression=zipfile.ZIP_DEFLATED) as z:
