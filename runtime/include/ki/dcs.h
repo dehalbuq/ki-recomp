@@ -36,6 +36,9 @@ public:
     // Compare optimized and original ADSP memory paths without changing the
     // sound firmware or DSP cycle timing. Defaults to fast on KI builds.
     void enable_fast_memory(bool enabled);
+    // Diagnostic-only DSP instruction PC histogram sampled 1 in 1024.
+    void enable_pc_profiling(bool enabled);
+    void log_pc_hotspots(uint64_t guest_frame);
     uint64_t cycles() const { return dsp_.total_cycles(); }
     uint32_t dsp_pc() const { return dsp_.pc(); }
 
