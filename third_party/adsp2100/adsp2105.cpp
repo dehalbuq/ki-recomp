@@ -373,6 +373,38 @@ void Adsp2105::set_ireg(int n, uint32_t v)
 	update_i(n);
 }
 
+void Adsp2105::enable_pc_profiling(bool enable)
+{
+    if (enable) m_pc_profiler = std::make_unique<PcProfiler>();
+    else m_pc_profiler.reset();
+}
+
+std::vector<std::pair<uint16_t, uint32_t>> Adsp2105::take_pc_hotspots(
+    std::size_t max_entries, uint32_t& sampled_instructions)
+{
+    sampled_instructions = 0;
+    std::vector<std::pair<uint16_t, uint32_t>> top;
+    if (!m_pc_profiler) return top;
+    PcProfiler& prof = *m_pc_profiler;
+    sampled_instructions = prof.sampled;
+    top.reserve(max_entries);
+    for (uint32_t pc = 0; pc < prof.counts.size(); ++pc) {
+        const uint32_t count = prof.counts[pc];
+        if (!count) continue;
+        auto pos = top.begin();
+        while (pos != top.end() &&
+               (pos->second > count || (pos->second == count && pos->first < pc)))
+            ++pos;
+        if (top.size() < max_entries || pos != top.end()) {
+            top.insert(pos, {static_cast<uint16_t>(pc), count});
+            if (top.size() > max_entries) top.pop_back();
+        }
+    }
+    prof.counts.fill(0);
+    prof.sampled = 0;
+    return top;
+}
+
 int Adsp2105::run(int cycles)
 {
 	if (m_in_reset)
@@ -395,6 +427,14 @@ int Adsp2105::run(int cycles)
 	{
 		// debugging
 		m_ppc = m_pc;   // copy PC to previous PC
+
+        // Optional diagnostic sampling, entirely separate from the guest
+        // counters. Disabled normally; 1 sample per 1024 instructions when on.
+        if (PcProfiler* profiler = m_pc_profiler.get();
+            profiler && ((++profiler->counter & 1023u) == 0)) {
+            ++profiler->counts[m_pc & 0x3fffu];
+            ++profiler->sampled;
+        }
 
 #if ADSP_TRACK_HOTSPOTS
 		m_pcbucket[m_pc & 0x3fff]++;
