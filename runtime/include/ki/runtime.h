@@ -43,6 +43,9 @@ struct IoHandler {
     virtual uint32_t interrupt_lines(Context&) { return 0; }
     // Cycle count at which the board next needs attention (line changes, frames).
     virtual uint64_t next_event(Context&) { return ~0ull; }
+    // Earliest observable change to an IRQ line, including end of VBlank.
+    // Only consulted by the experimental MIPS busy-loop accelerator.
+    virtual uint64_t irq_edge(Context& c) { return next_event(c); }
     // Called from safe points once ctx.cycles reaches next_event().
     virtual void update(Context&) {}
 };
@@ -88,6 +91,9 @@ struct Context {
     // R36S-only opt-in fast COP0 reads. The original mfc0() remains available
     // for side-by-side hardware comparison and every other platform.
     bool fast_cop0 = false;
+    bool fast_mips_idle = false;
+    uint64_t mips_idle_skipped_cycles = 0;
+    uint64_t mips_idle_skipped_iterations = 0;
 };
 
 // Raised for guest exceptions. Exception delivery to the guest's own vector is
@@ -319,6 +325,42 @@ struct FrameGuard {
 void service(Context& c, uint32_t pc);
 inline void poll(Context& c, uint32_t pc) {
     if (c.cycles >= c.next_event) service(c, pc);
+}
+
+// Hardware event-driven idle loop: invoked ONLY by the recompiler after an
+// exact verified 5-instruction MFC0 Cause / NOP / ANDI / BEQ/BNE / delay
+// pattern has completed a *taken* backward branch. CPU cycles are conserved.
+// We only skip additional repetitions that cannot observe an IRQ change.
+// All remaining iterations, interrupts and delay slots are interpreted by
+// the original generated MIPS code.
+inline void poll_irq_idle(Context& c, uint32_t pc, uint32_t mask,
+                          unsigned tested_reg, unsigned counter_reg,
+                          int counter_imm, unsigned loop_cycles = 6) {
+    poll(c, pc);
+    if (!c.fast_mips_idle || !c.io || loop_cycles == 0) return;
+    const uint32_t current =
+        (lo32(c.cp0[kCp0Cause]) & (mask & ~0x7c00u)) |
+        (c.io->interrupt_lines(c) & (mask & 0x7c00u));
+    // An IRQ may have changed BETWEEN the mfc0 at loop entry and the
+    // branch's delay slot. If so, the very next real loop must inspect it.
+    if ((lo32(c.r[tested_reg]) & mask) != (current & mask)) return;
+    const uint64_t edge = c.io->irq_edge(c);
+    const uint64_t deadline = edge < c.next_event ? edge : c.next_event;
+    if (deadline <= c.cycles) return;
+    // Stop BEFORE the next IRQ edge. The ordinary code then completes
+    // the final iteration and passes through its normal interrupt safepoint.
+    uint64_t repeats = (deadline - c.cycles - 1) / loop_cycles;
+    if (repeats == 0) return;
+    // Bounded guard against malformed firmware event deadlines.
+    if (repeats > 300000) repeats = 300000;
+    c.cycles += repeats * loop_cycles;
+    if (counter_reg != 0) {
+        const uint32_t next = lo32(c.r[counter_reg]) +
+            static_cast<uint32_t>(counter_imm) * static_cast<uint32_t>(repeats);
+        c.r[counter_reg] = sx32(next);
+    }
+    c.mips_idle_skipped_cycles += repeats * loop_cycles;
+    c.mips_idle_skipped_iterations += repeats;
 }
 void schedule(Context& c);  // recompute next_event after state changes
 void eret(Context& c);
