@@ -63,11 +63,13 @@ public:
         output_.clear();
         const uint32_t queue_ms = static_cast<uint32_t>(
             (static_cast<uint64_t>(queue_bytes) * 1000) / (2 * kRate));
+#ifndef KI_R36S_RELEASE_CLEAN
         stats_.min_queue_ms = std::min(stats_.min_queue_ms, queue_ms);
         stats_.max_queue_ms = std::max(stats_.max_queue_ms, queue_ms);
         stats_.low_queue_frames += queue_ms < 20 ? 1u : 0u;
         stats_.frames++;
         stats_.input_samples += pcm.size();
+#endif
 
         // One emulated frame takes 1/58.98 seconds. If the host only
         // sustains 50 FPS, produce ~1.18 host samples per guest sample.
@@ -84,7 +86,9 @@ public:
         desired *= std::clamp(1.0 + 0.10 * queue_error, 0.88, 1.10);
         desired = std::clamp(desired, 0.85, 1.75);
         ratio_ += (desired - ratio_) * 0.14;
+#ifndef KI_R36S_RELEASE_CLEAN
         stats_.stretch = ratio_;
+#endif
 
         input_.insert(input_.end(), pcm.begin(), pcm.end());
         if (!initialized_) {
@@ -147,7 +151,9 @@ public:
             input_.erase(input_.begin(), input_.begin() + consumed);
             last_start_ -= consumed;
         }
+#ifndef KI_R36S_RELEASE_CLEAN
         stats_.output_samples += output_.size();
+#endif
         return output_;
     }
 
