@@ -27,6 +27,33 @@ endif()
 # ADSP-2105 core for the DCS sound board, derived from MAME (BSD-3-Clause, see third_party/adsp2100).
 add_library(adsp2105 STATIC third_party/adsp2100/adsp2105.cpp)
 target_include_directories(adsp2105 PUBLIC third_party/adsp2100)
+if(KI_R36S)
+  # Private build-time DSP-to-native specialization. The generated include
+  # may contain sound firmware opcodes and MUST remain under build-r36s/,
+  # never in source control. Without the private ROM it emits only synthetic
+  # ROM-free test cases.
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  set(KI_DSP_BOOT_ROM "${CMAKE_SOURCE_DIR}/data/roms/kinst/u10-l1" CACHE FILEPATH
+      "User-supplied original KI1 u10 sound ROM; build input only")
+  set(_dsp_inc "${CMAKE_BINARY_DIR}/gen_dsp/ki_adsp_native.inc")
+  set(_dsp_deps "${CMAKE_SOURCE_DIR}/tools/r36s/generate_adsp_native.py")
+  if(EXISTS "${KI_DSP_BOOT_ROM}")
+    list(APPEND _dsp_deps "${KI_DSP_BOOT_ROM}")
+  endif()
+  add_custom_command(
+    OUTPUT "${_dsp_inc}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/r36s/generate_adsp_native.py"
+            --rom "${KI_DSP_BOOT_ROM}" --out "${_dsp_inc}"
+    DEPENDS ${_dsp_deps}
+    COMMENT "Compiling private KI1 ADSP-2105 opcode specializations"
+    VERBATIM)
+  add_custom_target(ki_adsp_native_header DEPENDS "${_dsp_inc}")
+  add_dependencies(adsp2105 ki_adsp_native_header)
+  set_source_files_properties(third_party/adsp2100/adsp2105.cpp
+      PROPERTIES OBJECT_DEPENDS "${_dsp_inc}")
+  target_include_directories(adsp2105 PRIVATE "${CMAKE_BINARY_DIR}/gen_dsp")
+  target_compile_definitions(adsp2105 PRIVATE KI_ADSP_NATIVE_IMAGE=1)
+endif()
 if(NOT MSVC)
   target_compile_options(adsp2105 PRIVATE -Wno-sign-compare -O2)
 endif()
