@@ -57,6 +57,7 @@
 #include "ki_r36s_host_profiler.h"
 #include "ki_r36s_gfx_profiler.h"
 #include "ki_r36s_audio_smooth.h"
+#include "ki_r36s_blue_boot_wipe.h"
 #include "ki/rgb555_upload.h"
 #endif
 #ifdef KI_HAVE_FILES
@@ -199,6 +200,11 @@ int main(int argc, char** argv) {
     const bool r36s_bench_no_dcs = std::getenv("KI_R36S_BENCH_NO_DCS") != nullptr;
     const bool r36s_audio_trace = std::getenv("KI_R36S_AUDIO_TRACE") != nullptr;
     const bool r36s_audio_smooth = std::getenv("KI_R36S_AUDIO_SMOOTH") != nullptr;
+    // Test21: fast-forward *only* a confirmed early blue descending wipe.
+    // Disabled with KI_R36S_BOOT_BLUE_FAST=0; no gameplay speed changes.
+    const char* boot_blue_setting = std::getenv("KI_R36S_BOOT_BLUE_FAST");
+    const bool r36s_boot_blue_enabled = boot_blue_setting &&
+        boot_blue_setting[0] != '0';
     std::fprintf(stderr, "[r36s] pitch-preserving adaptive audio: %s\n",
                  r36s_audio_smooth ? "ON (experimental WSOLA)" : "OFF (original DSP output)");
     const bool r36s_dsp_hotspots = std::getenv("KI_R36S_DSP_HOTSPOTS") != nullptr;
@@ -437,6 +443,11 @@ int main(int argc, char** argv) {
     SDL_AudioDeviceID audio = 0;
 #ifdef KI_R36S
     ki_r36s::AudioSmooth audio_smoother;
+    ki_r36s::BlueBootWipe r36s_boot_blue_detector;
+    bool r36s_boot_blue_fast = false;
+    if (r36s_boot_blue_enabled)
+        std::fprintf(stderr,
+            "[r36s] BOOT_BLUE enabled: fast-forward confirmed early blue wipe only; original gameplay speed preserved\n");
     bool r36s_audio_primed = false;
     bool r36s_audio_clock_valid = false;
     std::chrono::steady_clock::time_point r36s_audio_last_vblank;
@@ -759,6 +770,40 @@ int main(int argc, char** argv) {
 #endif
     };
     board.on_vblank = [&](ki::Context& ctx, uint64_t frame) {
+#ifdef KI_R36S
+        if (r36s_boot_blue_enabled && !turbo && !paused && !r36s_menu_open) {
+            const bool detected_fast = r36s_boot_blue_detector.update(
+                ctx.sram.data() + board.displayed_bank(), frame);
+            if (detected_fast != r36s_boot_blue_fast) {
+                r36s_boot_blue_fast = detected_fast;
+                const auto& p = r36s_boot_blue_detector.last_probe();
+                std::fprintf(stderr,
+                    "[r36s] BOOT_BLUE transition=%s guest_frame=%llu top_blue_rows=%u/30 sampled_blue=%u/30\n",
+                    detected_fast ? "FAST" : "NORMAL",
+                    static_cast<unsigned long long>(frame),
+                    p.top_rows, p.blue_rows);
+                // Startup turbo drops *playback* (not emulated DSP work) and
+                // resets the SDL queue, so boot audio cannot play back late
+                // when the original 58.98 Hz gameplay pacing resumes.
+                if (audio && r36s_audio_smooth) {
+                    SDL_PauseAudioDevice(audio, 1);
+                    SDL_ClearQueuedAudio(audio);
+                    audio_smoother.reset();
+                    r36s_audio_primed = false;
+                    r36s_audio_clock_valid = false;
+                }
+                next_frame = std::chrono::steady_clock::now();
+            }
+            if (frame <= ki_r36s::BlueBootWipe::kMaxBootFrames && frame % 90 == 0) {
+                const auto& p = r36s_boot_blue_detector.last_probe();
+                std::fprintf(stderr,
+                    "[r36s] BOOT_BLUE probe guest_frame=%llu blue_rows=%u/30 top_rows=%u bottom_rows=%u accelerated=%d\n",
+                    static_cast<unsigned long long>(frame),
+                    p.blue_rows, p.top_rows, p.bottom_rows,
+                    r36s_boot_blue_fast ? 1 : 0);
+            }
+        }
+#endif
         SDL_Event ev;
         for (bool first = true; first || paused || pad_setup.open()
 #ifdef KI_R36S
@@ -1115,6 +1160,9 @@ int main(int argc, char** argv) {
         board.p1 = p1;
         board.p2 = p2;
 
+#ifdef KI_R36S
+        const bool frame_turbo = turbo || r36s_boot_blue_fast;
+#endif
         if (dcs) {
             std::vector<int16_t>& pcm = dcs->samples();
 #ifdef KI_R36S
@@ -1140,7 +1188,7 @@ int main(int argc, char** argv) {
             }
 #endif
 #ifdef KI_R36S
-            if (audio && !turbo && r36s_audio_smooth) {
+            if (audio && !frame_turbo && r36s_audio_smooth) {
                 const auto now_audio = std::chrono::steady_clock::now();
                 const double dt = r36s_audio_clock_valid
                     ? std::chrono::duration<double>(now_audio - r36s_audio_last_vblank).count()
@@ -1172,7 +1220,13 @@ int main(int argc, char** argv) {
             {
                 // Reference path: exact DSP PCM, no adaptive host stretching.
                 // Drop audio in turbo mode, or if the queue exceeds 200 ms.
-                if (audio && !turbo && SDL_GetQueuedAudioSize(audio) < 31250 * 2 / 5)
+                if (audio &&
+#ifdef KI_R36S
+                    !frame_turbo &&
+#else
+                    !turbo &&
+#endif
+                    SDL_GetQueuedAudioSize(audio) < 31250 * 2 / 5)
                     SDL_QueueAudio(audio, pcm.data(),
                                    static_cast<Uint32>(pcm.size() * sizeof(int16_t)));
             }
@@ -1180,11 +1234,18 @@ int main(int argc, char** argv) {
         }
 #ifdef KI_R36S
         // Diagnostic-only A/B switch. Normal path renders EVERY game frame.
-        if ((!turbo || frame % 8 == 0) && frame % r36s_bench_render_every == 0) present(ctx);
+        if ((!frame_turbo || frame % (r36s_boot_blue_fast ? 4u : 8u) == 0) &&
+            frame % r36s_bench_render_every == 0) present(ctx);
 #else
         if (!turbo || frame % 8 == 0) present(ctx);
 #endif
-        if (!turbo) {
+        if (
+#ifdef KI_R36S
+            !frame_turbo
+#else
+            !turbo
+#endif
+        ) {
             next_frame += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 std::chrono::duration<double>(kFrameSeconds));
             // For the original source PCM, slightly slow when >60ms queued.
@@ -1203,6 +1264,13 @@ int main(int argc, char** argv) {
             if (next_frame > now) std::this_thread::sleep_until(next_frame);
             else if (now - next_frame > std::chrono::milliseconds(100)) next_frame = now;  // fell behind: resync
         }
+#ifdef KI_R36S
+        else if (r36s_boot_blue_fast) {
+            // Do not accumulate a stale pacing deadline while speeding only
+            // the early boot curtain; immediately restore normal cadence.
+            next_frame = std::chrono::steady_clock::now();
+        }
+#endif
     };
 #ifdef KI_R36S
     if (r36s_host_profile)
