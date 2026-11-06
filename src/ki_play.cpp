@@ -55,6 +55,7 @@
 #ifdef KI_R36S
 #include "ki_r36s_menu.h"
 #include "ki_r36s_host_profiler.h"
+#include "ki_r36s_gfx_profiler.h"
 #endif
 #ifdef KI_HAVE_FILES
 #include "ki_files.h"
@@ -836,6 +837,7 @@ int main(int argc, char** argv) {
                 r36s_rss_kib() / 1024.0, r36s_cpu_khz());
             if (r36s_host_profile)
                 ki_r36s::host_profiler::report(r36s_sample_frames);
+            ki_r36s::gfx_profiler::report(r36s_sample_frames);
             if (c.fast_mips_idle) {
                 const uint64_t saved = c.mips_idle_skipped_cycles;
                 std::fprintf(stderr, "[r36s] MIPS_IDLE saved=%llu cycles_this_window total=%llu iterations=%llu\n",
