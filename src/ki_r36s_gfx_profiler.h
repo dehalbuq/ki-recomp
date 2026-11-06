@@ -3,7 +3,7 @@
 // Does NOT change framebuffer output, game cycles, audio, or SDL rendering.
 // Sampling is OFF on normal game runs: no clock calls unless explicitly set.
 #pragma once
-#ifdef KI_R36S
+#if defined(KI_R36S) || defined(KI_R36S_GFX_PROFILE_SUPPORTED)
 #include <array>
 #include <chrono>
 #include <cstdint>
