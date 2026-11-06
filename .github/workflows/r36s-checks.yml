@@ -67,9 +67,10 @@ jobs:
           SDL_VIDEODRIVER=dummy /tmp/ki-r36s-intro-selftest
       - name: Check launchers, build scripts and metadata
         run: |
-          bash -n tools/r36s/build.sh tools/r36s/diagnose.sh
+          bash -n tools/r36s/build.sh tools/r36s/diagnose.sh tools/r36s/build_arkos_legacy_container.sh
+          bash tests/r36s_dual_abi_launcher_selftest.sh
           find tools/r36s/portmaster -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py tools/kirecomp/idle_patterns.py
+          python3 -m py_compile tools/r36s/audit_legacy_abi.py tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py tools/kirecomp/idle_patterns.py
           python3 tools/kirecomp/idle_patterns.py
           python3 tools/r36s/prepare_data.py --help >/dev/null
           python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
@@ -126,4 +127,33 @@ jobs:
               assert "killerinstinct/ki_play.aarch64" in z.namelist()
               assert z.testzip() is None
           print("ROM-free clean release package smoke: OK")
+          PY
+      - name: Check dual-ABI package assembler with synthetic no-game ELF artifacts
+        run: |
+          # The host runner is native AArch64; this is synthetic code and
+          # synthetic library stubs, never any commercial game data.
+          printf 'int start(void) { return 0; }\n' | \
+            cc -nostdlib -Wl,-e,start -x c - -o /tmp/ki-legacy-synthetic
+          mkdir -p /tmp/ki-legacy-synthetic-libs
+          for lib in libSDL2-2.0.so.0 libstdc++.so.6 libgcc_s.so.1; do
+            cp /tmp/ki-legacy-synthetic /tmp/ki-legacy-synthetic-libs/"$lib"
+          done
+          python3 tools/r36s/audit_legacy_abi.py --max-glibc 2.30 \
+            /tmp/ki-legacy-synthetic /tmp/ki-legacy-synthetic-libs
+          python3 tools/r36s/package_port.py /tmp/ki-legacy-synthetic \
+            --release --legacy-binary /tmp/ki-legacy-synthetic \
+            --legacy-libs /tmp/ki-legacy-synthetic-libs \
+            --output /tmp/ki-dual-synthetic.zip
+          python3 - <<'PY'
+          from zipfile import ZipFile
+          with ZipFile("/tmp/ki-dual-synthetic.zip") as z:
+              assert z.testzip() is None
+              names=set(z.namelist())
+              assert {"killerinstinct/ki_play.aarch64",
+                      "killerinstinct/ki_play.glibc230.aarch64",
+                      "killerinstinct/libs.glibc230/libstdc++.so.6",
+                      "killerinstinct/libs.glibc230/libSDL2-2.0.so.0",
+                      "killerinstinct/libs.glibc230/libgcc_s.so.1"} <= names
+              assert {n for n in names if n.endswith(".sh")} == {"Killer Instinct Arcade.sh"}
+          print("R36S ROM-free dual ABI ZIP selftest PASS")
           PY
