@@ -32,7 +32,7 @@ FIXTURE = {
     0x40A: 0x90005A,  # DM write immediate
     0x40B: 0x1840CF,  # jump immediate (always)
     0x40C: 0x300001,  # load non-data register immediate
-    0x40D: 0x000000,  # NOP
+    0x40D: 0x18400F,  # unconditional loop to test many native instructions
 }
 
 def supported(op: int) -> bool:
