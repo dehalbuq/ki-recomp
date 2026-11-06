@@ -63,3 +63,55 @@ Review the diagnostic before sharing; the log contains machine/library details, 
 The ARM64 GitHub Actions workflow can build the guest-independent runtime self-test and syntax-check the SDL2 player **without copyrighted ROMs**. It does **not** produce a playable KI binary, verify 58.98 FPS, prove glibc compatibility, or validate controls, audio and graphics on R36S hardware.
 
 The PortMaster packaging is a **prototype** pending real tests and the required gameplay screenshot for public submission. Do not release ROMs, CHD, extracted game data, or generated game-derived source. Honor the original MIT and third-party BSD licenses.
+
+## Dual AArch64 ABI package — dArkOSRE and ArkOS4Clone candidate
+
+A single root `Killer Instinct Arcade.sh` now determines the runtime
+firmware glibc via `getconf GNU_LIBC_VERSION` and chooses:
+
+| Firmware GLIBC version | Executable | Libraries |
+|---|---|---|
+| 2.38 or newer | `killerinstinct/ki_play.aarch64` | firmware native (or `libs.aarch64/` if included) |
+| 2.28–2.37 | `killerinstinct/ki_play.glibc230.aarch64` | `killerinstinct/libs.glibc230/` |
+| earlier/unknown | launcher stops with explanation | none |
+
+The legacy binary is **compiled separately** with GCC 14 and
+C++20 inside `quay.io/pypa/manylinux_2_28_aarch64` (AlmaLinux 8 /
+GLIBC 2.28). The private container builds a compatible SDL2 with
+KMSDRM/OpenGLES2 and bundles only the old-ABI SDL2, libstdc++ and
+libgcc_s. It does not bundle or change system libc, ELF loader, GBM,
+EGL or GPU drivers.
+
+Build both executables **only in a private environment** with
+your own legitimate game files:
+
+```sh
+KI_BUILD_TYPE=Release KI_R36S_MIPS_O3=ON \
+ KI_R36S_RELEASE_CLEAN=ON bash tools/r36s/build.sh
+docker run --rm --platform linux/arm64 \
+ -v "$PWD:/src" -w /src quay.io/pypa/manylinux_2_28_aarch64 \
+ bash tools/r36s/build_arkos_legacy_container.sh
+python3 tools/r36s/audit_legacy_abi.py --max-glibc 2.30 \
+ build-r36s-legacy/ki_play build-arkos-deps/libs.glibc230
+python3 tools/r36s/package_port.py build-r36s/ki_play --release \
+ --legacy-binary build-r36s-legacy/ki_play \
+ --legacy-libs build-arkos-deps/libs.glibc230 \
+ --output KI-R36S-v0.1.0-DUAL-ARM64.zip
+```
+
+The ZIP contains both native AArch64 binaries and just **one**
+PortMaster launcher, with startup credits and legal disclaimer.
+`ki_play.glibc230.aarch64` is intended for ArkOS4Clone but needs
+a real test on that firmware: `readelf` verifies exported symbol
+requirements, **not** drivers, kernel ABI, audio or controls.
+To test selection without launching, developers may set
+`KI_R36S_ABI_SELECT_ONLY=1`. Run `bash
+tests/r36s_dual_abi_launcher_selftest.sh` for ROM-free routing
+regressions.
+
+The older-ABI binary may still require device-specific SDL2/KMSDRM
+drivers or other firmware libraries. Do not declare it ArkOS4Clone
+compatible until boot, gameplay, sound and save behavior have been
+verified on real hardware. Redistribution of the executable requires
+separate rights review because the recompiled binary can contain
+game-derived copyrighted code.
