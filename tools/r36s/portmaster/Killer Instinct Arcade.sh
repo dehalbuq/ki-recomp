@@ -134,7 +134,7 @@ else
   echo "WARNING: PortMaster control.txt was not found; falling back to firmware SDL2 settings."
 fi
 
-if ! select_ki_binary; then exit $?; fi
+if select_ki_binary; then :; else exit $?; fi
 if [ "${KI_R36S_ABI_SELECT_ONLY:-0}" = 1 ]; then
   echo "ABI selection check only: complete (game not started)"
   exit 0
