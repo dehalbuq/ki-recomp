@@ -3,6 +3,7 @@ project(ki_recomp LANGUAGES CXX)
 
 option(KI_R36S "R36S / PortMaster fullscreen 4:3, nearest filtering and diagnostic SDL2 fallback" OFF)
 option(KI_R36S_MIPS_O3 "Compile generated MIPS R4600 code with aggressive -O3 for a separate R36S A/B binary" OFF)
+option(KI_R36S_LTO "Experimental R36S whole-program IPO/LTO for generated MIPS and runtime (A/B only)" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -419,6 +420,30 @@ if(KI_BUILD_FULL)
       target_compile_options(ki_hd PRIVATE -mcpu=cortex-a35)
       target_compile_options(chdr-static PRIVATE -mcpu=cortex-a35)
     endif()
-    message(STATUS "R36S Cortex-A35 tuning active (no fast-math or LTO)")
+    message(STATUS "R36S Cortex-A35 tuning active (no fast-math)")
+  endif()
+  # Test20 experimental second executable. IPO lets the native AArch64
+  # compiler optimize/in-line across generated recompiled MIPS units and
+  # emulator runtime libraries, but may affect cache pressure or behavior.
+  # Keep the established Release/O3 code path as the default and compare
+  # separately on RK3326 before enabling this for normal gameplay.
+  if(KI_R36S AND KI_R36S_LTO)
+    if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+      message(FATAL_ERROR "KI_R36S_LTO requires -DCMAKE_BUILD_TYPE=Release")
+    endif()
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT _ki_ipo_ok OUTPUT _ki_ipo_error LANGUAGES CXX)
+    if(NOT _ki_ipo_ok)
+      message(FATAL_ERROR "R36S LTO not supported by this toolchain: ${_ki_ipo_error}")
+    endif()
+    foreach(_ki_target IN ITEMS ki_full_code ki_runtime ki_boot_rom_code
+                                   ki_boot adsp2105 ki_play)
+      set_property(TARGET ${_ki_target} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endforeach()
+    if(KI_WITH_CHD)
+      set_property(TARGET ki_files PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+      set_property(TARGET ki_hd PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
+    message(STATUS "R36S Test20 EXPERIMENTAL LTO enabled: do not ship as default without hardware A/B")
   endif()
 endif()
