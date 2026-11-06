@@ -40,6 +40,7 @@ public:
     // direct-memory mode; exposed for side-by-side regression testing.
     void enable_ki_waitloop_fastpath(bool enabled);
     uint64_t waitloop_skipped_cycles() const;
+    uint64_t native_opcode_count() const;
     // Opt-in host-time accounting of ADSP execution. Disabled in normal game.
     struct TimingSample { uint64_t host_ns = 0, calls = 0, guest_cycles = 0; };
     TimingSample take_timing_sample();
