@@ -1,57 +1,60 @@
-# Killer Instinct Arcade — R36S native ARM64 / PortMaster prototype
+# Killer Instinct — R36S ARM64 / PortMaster (source template)
 
-A native AArch64 statically recompiled KI arcade engine, adapted by
-[dehalbuq](https://github.com/dehalbuq) from
+This source folder contains the PortMaster package template for the
+independent [dehalbuq](https://github.com/dehalbuq) port based on
 [kilnan/ki-recomp](https://github.com/kilnan/ki-recomp).
-Additional components include the independently licensed SDL2,
-libchdr and MAME-derived audio core. This is **not** an official
-PortMaster submission and has no game assets included.
 
-## Minimal launch menu (Test20)
+**Status: v0.1.0 release candidate**, verified in ROM-free CI and
+on dArkOSRE in earlier Test21 builds. The latest startup credits/legal
+screens and the stripped binary still require final R36S hardware
+validation. This is **not** an official PortMaster catalog release.
 
-Exactly two scripts are shipped; all earlier Test3–Test19 benchmark
-launchers have been removed from the new ZIP:
+## Minimal release package
 
-- `Killer Instinct Arcade.sh` — normal optimized build: Cortex-A35
-  tuned generated MIPS (-O3), safe indirect-function cache,
-  original arcade 58.98 Hz timing, OpenGLES2 RGBA8888 / ARM NEON
-  conversion with `SDL_UpdateTexture`, 4:3 exact 2x pixel scaling,
-  full-frame rendering, experimental pitch-preserving WSOLA audio.
-  The slower Test19 direct SDL texture lock is **not** used.
-- `KI R36S - Host Profile.sh` — CPU performance diagnosis only:
-  native function PC samples, DSP timing, GPU upload and MIPS
-  indirect-lookup cache statistics. It can reduce FPS; do not
-  benchmark this launcher against normal mode.
+The clean release ZIP is created by:
 
-The runtime cache can be disabled for a controlled experiment by
-setting `KI_R36S_DISPATCH_BASELINE=1` in the environment before
-launching. No special PortMaster menu launcher is required.
+```sh
+KI_BUILD_TYPE=Release KI_R36S_MIPS_O3=ON \
+  KI_R36S_RELEASE_CLEAN=ON bash tools/r36s/build.sh
+python3 tools/r36s/package_port.py build-r36s/ki_play --release \
+  --output /tmp/ki-r36s-v0.1.0-private.zip
+```
 
-## Legal game data (not bundled)
+The release ZIP includes **only `Killer Instinct Arcade.sh`** as
+launchable PortMaster entry, a stripped AArch64 executable, project
+license files, a plain-text README and metadata. Legacy Test3–21
+diagnostic launchers are omitted; previous exact launcher names
+are safely cleaned up on a user's first launch.
 
-Copy your own legally obtained `kinst.zip` (with KI1 L1.5D BIOS and
-sound ROMs) and `kinst.chd` into
-`/roms/ports/killerinstinct/gamedata/`.
-This project never downloads original game ROMs or CHD automatically.
+A source/dev ZIP *without* `--release` additionally includes the
+optional `KI R36S - Host Profile.sh` diagnostic launcher, but do not
+confuse that with the public-facing release.
 
-## Controls
+On boot, two small SDL2 pages show **project credits** and **legal
+information** before the user-supplied original game data is read.
+The page renderer is inactive during emulation.
 
-D-pad = movement; X/Y/R1 = high attacks; A/B/R2 = low attacks.
-Start = start; Select/L1 = coin. Hold **Start + Select** for the
-pause/exit menu (~0.8 seconds). Press A to confirm RESUME/EXIT,
-or B to resume. Actual mapping depends on the firmware's SDL2 database.
+## Hardware, controls, data
 
-## Performance logs
+- RK3326 Cortex-A35, Linux AArch64 / PortMaster, dArkOSRE verified
+  in previous builds; other firmwares and GLIBC ABI need testing.
+- Original arcade 320×240 -> native 4:3 640×480, exact nearest scaling.
+- OpenGL ES2 / ARM NEON RGBA upload, static -O3 MIPS recompiler,
+  ADSP-2105 DSP emulator, WSOLA audio playback and bounded blue
+  startup fast-forward.
+- D-pad/left stick move; X/Y/R1 high attacks; A/B/R2 low attacks.
+  Start begins, Select/L1 inserts coin; hold Start+Select for exit.
+- User must place their own legally acquired `kinst.zip` and
+  `kinst.chd` into `killerinstinct/gamedata/`.
 
-Normal log: `killerinstinct/logs/ki-r36s.log`.
-CPU diagnostic log: `killerinstinct/logs/ki-r36s-test20-cpu-profile.log`.
+**No original ROM or CHD is bundled.** However, the compiled static
+recompiler executable may contain game-derived copyrighted material.
+Do not assume permission to redistribute it; review the rights
+and obtain any necessary authorization before publishing binaries.
 
-Test19 on dArkOSRE measured 52.38 FPS average with NEON Update
-versus 50.78 with NEON Locked and 52.17 with Scalar Locked.
-NEON NoClear registered 54.03 FPS, but had different scene durations
-and its speedup remains unproven; removing SDL clear is not default.
+## Documentation and contributions
 
-See `docs/R36S_TEST20_RECOMPILER.md` for Test20 measurements,
-correctness checks, and limitations. The GLIBC and SDL2 requirements
-of a GitHub-hosted Ubuntu ARM64 build may differ from the user's
-firmware; verify on the actual R36S.
+- [Progress and hardware evidence](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/docs/R36S_PROGRESS.md)
+- [Detailed credits and legal notice](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/docs/R36S_LEGAL.md)
+- [Contributing to the R36S branch](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/CONTRIBUTING.md)
+- [Guia em português](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/docs/R36S_README_PTBR.md)
