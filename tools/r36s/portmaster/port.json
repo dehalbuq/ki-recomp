@@ -7,13 +7,13 @@
   ],
   "items_opt": [],
   "attr": {
-    "title": "Killer Instinct (Arcade) — ki-recomp",
+    "title": "Killer Instinct (Arcade) — R36S ARM64",
     "porter": [
       "dehalbuq"
     ],
-    "desc": "Experimental SDL2 ARM64 R36S/PortMaster port of kilnan's static recompilation.",
+    "desc": "Independent experimental R36S ARM64 port of kilnan's static Killer Instinct recompilation. GLES2/NEON, Audio Smooth, 4:3.",
     "desc_md": null,
-    "inst": "Supply your own legal kinst.zip (BIOS L1.5D) and kinst.chd in killerinstinct/gamedata.",
+    "inst": "Provide your own lawful kinst.zip (L1.5D BIOS) and kinst.chd in killerinstinct/gamedata. Game code is statically recompiled; review legal notice and distribution rights.",
     "inst_md": null,
     "genres": [
       "fighting"
