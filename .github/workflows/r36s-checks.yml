@@ -59,6 +59,11 @@ jobs:
         run: |
           c++ -std=c++20 -O3 -DNDEBUG -fsyntax-only             -DKI_R36S=1 -DKI_R36S_RELEASE_CLEAN=1             -Iruntime/include -Ithird_party/adsp2100 -Isrc             $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
           c++ -std=c++20 -O3 -DNDEBUG -fsyntax-only             -DKI_R36S_FAST_DISPATCH=1 -DKI_R36S_RELEASE_CLEAN=1             -Iruntime/include -Ithird_party/adsp2100 runtime/src/runtime.cpp
+          # Older ArkOS4Clone firmware SDL2 may not provide SDL 2.0.12/2.0.18 APIs.
+          c++ -std=c++20 -O3 -DNDEBUG -fsyntax-only -DKI_R36S=1 \
+            -DKI_R36S_RELEASE_CLEAN=1 -DKI_R36S_LEGACY_SDL_ABI=1 \
+            -Iruntime/include -Ithird_party/adsp2100 -Isrc \
+            $(sdl2-config --cflags) src/ki_play.cpp
       - name: Validate startup credits and legal page on headless ARM64 SDL2
         run: |
           c++ -std=c++20 -O2 -Wall -Wextra -Isrc \
@@ -68,6 +73,10 @@ jobs:
       - name: Check launchers, build scripts and metadata
         run: |
           bash -n tools/r36s/build.sh tools/r36s/diagnose.sh tools/r36s/build_arkos_legacy_container.sh
+          python3 -m py_compile tools/r36s/patch_sdl2_kmsdrm_legacy.py
+          python3 tools/r36s/patch_sdl2_kmsdrm_legacy.py --help >/dev/null
+          grep -q "SDL_VIDEO_FORCE_EGL" "tools/r36s/portmaster/Killer Instinct Arcade.sh"
+          grep -q "KI_R36S_VIDEO_DIAG" "tools/r36s/portmaster/Killer Instinct Arcade.sh"
           bash tests/r36s_dual_abi_launcher_selftest.sh
           find tools/r36s/portmaster -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
           python3 -m py_compile tools/r36s/audit_legacy_abi.py tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py tools/kirecomp/idle_patterns.py
