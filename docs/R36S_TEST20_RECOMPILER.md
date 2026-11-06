@@ -88,12 +88,38 @@ features remain in source under optional environment flags.
    Use `HOST_TOP`, `PHASE dsp_per_frame`, and `GFX_SDL_ES2`
    results to choose the next *measured* MIPS hotspot or DSP task.
 
+## Experimental native MIPS LTO A/B (compiled, not hardware-approved)
+
+The independent private GitHub ARM64 build passed for both options:
+
+- **Release/O3 reference:** `KI_R36S_MIPS_O3=ON`; AArch64 executable
+  4,878,760 bytes, without LTO.
+- **Release/O3 + LTO candidate:** `KI_R36S_MIPS_O3=ON`,
+  `KI_R36S_LTO=ON`; AArch64 executable 4,677,736 bytes,
+  **4.12% smaller**.
+- The LTO build uses CMake interprocedural optimization on the
+  recompiled MIPS C++ archive, runtime, audio, boot and SDL2 player
+  targets; no fast-math, skipped frames or guest timing modifications.
+- Both LTO and baseline passed synthetic `dispatch_cache_selftest`
+  and `dispatch_cache_baseline_selftest` on ARM64, and both PortMaster
+  ZIPs contain **exactly two** launchers.
+- **Size savings are not proof of higher FPS**. LTO can introduce
+  binary-size, I-cache or compiler regressions. Install/benchmark
+  independently and retain the ordinary O3 ZIP to roll back.
+  Neither package includes the game ROM or CHD.
+
+On the actual R36S: install O3, play a stage-matched 60-second fight,
+save `ki-r36s.log` as `ki-r36s-o3.log`; install LTO, repeat the same
+fight and save it as `ki-r36s-lto.log`. Validate colors, HUD, full
+frame presentation, controls, sound, menus, saves, exits and FPS.
+Avoid comparing FPS from the CPU profiler launcher itself.
+
 ## Next high-impact options after profiling
 
 - Optimize generated MIPS memory access dispatch and hot sprite /
   panorama routines only when a profiler identifies that code.
-- Explore cross-TU link-time inlining (LTO) **in a separate, reversible
-  build**, with exact game regression checks and hardware A/B results.
+- Use the already-built cross-TU LTO candidate only if independent
+  R36S gameplay and visual/audio regression tests confirm a benefit.
 - Accelerate GPU blitters only if equivalence tests guarantee CPU-visible
   framebuffer SRAM, clipping, palette, order and game cycle behavior.
 - Preserve full-frame 4:3 pixel scaling, original DSP chip timing and
