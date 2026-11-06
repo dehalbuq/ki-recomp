@@ -30,6 +30,16 @@ Dcs::Dcs(const std::vector<std::vector<uint8_t>>& roms)
     enable_ki_waitloop_fastpath(fast_loop);
     std::fprintf(stderr, "[dcs] ADSP2105 KI verified waitloop accelerator: %s\n",
                  fast_loop ? "ON" : "OFF");
+#ifdef KI_R36S_FAST_DSP
+    const bool native = std::getenv("KI_R36S_DSP_COMPILED") != nullptr;
+#else
+    const bool native = false;
+#endif
+    // Experimental only. The ordinary launcher runs the validated baseline.
+    // Program-memory opcode guards ensure modified firmware is interpreted.
+    dsp_.enable_native_opcodes(native);
+    std::fprintf(stderr, "[dcs] ADSP2105 compiled opcode experiment: %s\n",
+                 native ? "ON" : "OFF");
     board_reset();
     dsp_.reset();
 }
@@ -55,6 +65,10 @@ void Dcs::enable_ki_waitloop_fastpath(bool enabled) {
 
 uint64_t Dcs::waitloop_skipped_cycles() const {
     return dsp_.ki_waitloop_skipped_cycles();
+}
+
+uint64_t Dcs::native_opcode_count() const {
+    return dsp_.native_opcode_count();
 }
 
 Dcs::TimingSample Dcs::take_timing_sample() {
