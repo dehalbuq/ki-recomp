@@ -48,6 +48,19 @@ uint64_t KinstBoard::next_event(Context&) {
     return pending_ != Pending::None && busy_until_ < next_vblank_ ? busy_until_ : next_vblank_;
 }
 
+uint64_t KinstBoard::irq_edge(Context& c) {
+    uint64_t deadline = next_event(c);
+    // The existing board scheduler only updates on the VBlank RISING
+    // edge. Cause.IP2 also falls at the end of scanline 260; a MIPS
+    // busy-wait loop must never skip past that falling edge.
+    const uint64_t phase = (c.cycles + phase_) % kCyclesPerFrame;
+    if (phase >= kVblankStart) {
+        const uint64_t falling = c.cycles + (kCyclesPerFrame - phase);
+        if (falling < deadline) deadline = falling;
+    }
+    return deadline;
+}
+
 void KinstBoard::start_busy(uint64_t cycles, Pending what) {
     status_ = kBsy | kDsc;
     pending_ = what;
