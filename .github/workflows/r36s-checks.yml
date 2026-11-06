@@ -43,7 +43,7 @@ jobs:
       - name: Build guest-independent runtime self-test
         run: |
           cmake -S . -B build-ci -G Ninja -DCMAKE_BUILD_TYPE=Debug -DKI_BUILD_FULL=OFF -DKI_R36S=ON
-          cmake --build build-ci --target runtime_selftest dcs_fastmem_selftest dsp_hotspot_selftest dsp_waitloop_selftest kinst_vblank_fast_selftest mfc0_inline_selftest host_profiler_selftest --parallel 2
+          cmake --build build-ci --target runtime_selftest dcs_fastmem_selftest dsp_hotspot_selftest dsp_waitloop_selftest adsp_native_selftest kinst_vblank_fast_selftest mfc0_inline_selftest host_profiler_selftest --parallel 2
           ctest --test-dir build-ci --output-on-failure
       - name: Verify GNU ld circular archive link fix without game data
         run: |
@@ -58,7 +58,7 @@ jobs:
           bash -n tools/r36s/build.sh
           bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
           bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py
+          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py
           python3 tools/r36s/prepare_data.py --help >/dev/null
           python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
           python3 - <<'PY'
@@ -85,7 +85,7 @@ jobs:
           bash -n tools/r36s/build.sh
           bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
           bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py
+          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py
           python3 tools/r36s/prepare_data.py --help >/dev/null
           python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
           python3 - <<'PY'
@@ -112,7 +112,7 @@ jobs:
           bash -n tools/r36s/build.sh
           bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
           bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py
+          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py
           python3 tools/r36s/prepare_data.py --help >/dev/null
           python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
           python3 - <<'PY'
@@ -139,7 +139,7 @@ jobs:
           bash -n tools/r36s/build.sh
           bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
           bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py
+          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py
           python3 tools/r36s/prepare_data.py --help >/dev/null
           python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
           python3 - <<'PY'
@@ -166,7 +166,7 @@ jobs:
           bash -n tools/r36s/build.sh
           bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
           bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py
+          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py
           python3 tools/r36s/prepare_data.py --help >/dev/null
           python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
           python3 - <<'PY'
@@ -193,7 +193,7 @@ jobs:
           bash -n tools/r36s/build.sh
           bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
           bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py
+          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py
           python3 tools/r36s/prepare_data.py --help >/dev/null
           python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
           python3 - <<'PY'
@@ -220,7 +220,7 @@ jobs:
           bash -n tools/r36s/build.sh
           bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
           bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py
+          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py
           python3 tools/r36s/prepare_data.py --help >/dev/null
           python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
           python3 - <<'PY'
@@ -247,7 +247,7 @@ jobs:
           bash -n tools/r36s/build.sh
           bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
           bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py
+          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py
           python3 tools/r36s/prepare_data.py --help >/dev/null
           python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
           python3 - <<'PY'
