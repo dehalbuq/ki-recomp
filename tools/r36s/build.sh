@@ -21,6 +21,18 @@ args=(-S "$ROOT" -B "$ROOT/build-r36s" -G Ninja
   -DKI_R36S=ON -DKI_BUILD_FULL=ON -DKI_BUILD_TRACE=OFF -DKI_WITH_CHD=ON
   -DKI_SPLIT=32 "-DKI_PYTHON=$PYTHON_BIN")
 
+# Preserve the validated Test17 MIPS compiler choice in the Test18 builds.
+# Default remains OFF for conservative/manual builds; the private Test18
+# workflow explicitly uses ON to match the measured -O3 performance.
+MIPS_O3="${KI_R36S_MIPS_O3:-OFF}"
+case "$MIPS_O3" in
+  ON|OFF) ;;
+  *) echo "KI_R36S_MIPS_O3 must be ON or OFF, got: $MIPS_O3" >&2; exit 2 ;;
+esac
+args+=("-DKI_R36S_MIPS_O3=$MIPS_O3")
+echo "R36S build: type=${KI_BUILD_TYPE:-Debug}, generated MIPS O3=$MIPS_O3"
+
+
 # Both C and C++ MUST target AArch64. Otherwise libchdr's C objects end
 # up as x86_64 (EM=62) and the AArch64 linker fails with "file in wrong format".
 if [ "$(uname -m)" = "aarch64" ]; then
