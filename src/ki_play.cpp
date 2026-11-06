@@ -57,9 +57,14 @@
 #include "ki_r36s_intro.h"
 #include "ki_r36s_host_profiler.h"
 #include "ki_r36s_gfx_profiler.h"
-#include "ki_r36s_audio_smooth.h"
 #include "ki_r36s_blue_boot_wipe.h"
 #include "ki/rgb555_upload.h"
+#endif
+#if defined(KI_R36S) || defined(KI_ANDROID)
+#include "ki_r36s_audio_smooth.h"
+#endif
+#ifdef KI_ANDROID
+#include <android/log.h>
 #endif
 #ifdef KI_HAVE_FILES
 #include "ki_files.h"
@@ -196,6 +201,8 @@ int main(int argc, char** argv) {
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
+    // The reference PCM sink stays available as an A/B fallback.
+    const bool android_audio_smooth = std::getenv("KI_ANDROID_AUDIO_ORIGINAL") == nullptr;
 #endif
 #ifdef KI_R36S
     // Exact 320x240 -> 640x480 scaling, without changing the guest frame rate.
@@ -529,6 +536,13 @@ int main(int argc, char** argv) {
     if (cold) board.set_cycles_to_vblank(0);
     static std::unique_ptr<ki::Dcs> dcs;
     SDL_AudioDeviceID audio = 0;
+#ifdef KI_ANDROID
+    ki_r36s::AudioSmooth android_audio_smoother;
+    bool android_audio_primed = false;
+    bool android_audio_clock_valid = false;
+    std::chrono::steady_clock::time_point android_audio_last_vblank{};
+    uint64_t android_audio_frames = 0;
+#endif
 #ifdef KI_R36S
     ki_r36s::AudioSmooth audio_smoother;
     ki_r36s::BlueBootWipe r36s_boot_blue_detector;
@@ -556,10 +570,33 @@ int main(int argc, char** argv) {
             want.freq = 31250;
             want.format = AUDIO_S16SYS;
             want.channels = 1;
+#ifdef KI_ANDROID
+            // About 65.5ms at 31250Hz: more tolerance for Android scheduler jitter.
+            // SDL's queued PCM is also primed before playback (below).
+            want.samples = 2048;
+#else
             want.samples = 1024;
+#endif
             audio = SDL_OpenAudioDevice(nullptr, 0, &want, nullptr, 0);
             if (!audio) std::fprintf(stderr, "no audio: %s\n", SDL_GetError());
             else {
+#ifdef KI_ANDROID
+                if (android_audio_smooth) {
+                    // Do not start the Android audio sink with an empty queue:
+                    // the first late frame would otherwise cause a click.
+                    SDL_PauseAudioDevice(audio, 1);
+                    __android_log_print(ANDROID_LOG_INFO, "KI-Audio",
+                        "WSOLA=ON, SDL buffer=%u samples, start=%ums, target=%ums",
+                        static_cast<unsigned>(want.samples),
+                        ki_r36s::AudioSmooth::kStartQueueMs,
+                        ki_r36s::AudioSmooth::kTargetQueueMs);
+                } else {
+                    SDL_PauseAudioDevice(audio, 0);
+                    __android_log_print(ANDROID_LOG_INFO, "KI-Audio",
+                        "WSOLA=OFF (original PCM baseline), SDL buffer=%u samples",
+                        static_cast<unsigned>(want.samples));
+                }
+#else
 #ifdef KI_R36S
                 if (r36s_audio_smooth) {
                     // Keep device paused until ~90ms of ORIGINAL game audio
@@ -573,6 +610,7 @@ int main(int argc, char** argv) {
                 } else
 #endif
                 SDL_PauseAudioDevice(audio, 0);
+#endif
             }
         }
     }
@@ -1073,6 +1111,17 @@ int main(int argc, char** argv) {
                 if (ev.type == SDL_KEYDOWN && !ev.key.repeat && ev.key.keysym.scancode == SDL_SCANCODE_P) {
                     paused = !paused;
                     if (audio) {
+#ifdef KI_ANDROID
+                        if (android_audio_smooth) {
+                            if (paused) {
+                                SDL_PauseAudioDevice(audio, 1);
+                                SDL_ClearQueuedAudio(audio);
+                                android_audio_smoother.reset();
+                                android_audio_primed = false;
+                                android_audio_clock_valid = false;
+                            } // resume primes a fresh queue to avoid stale sound
+                        } else
+#endif
 #ifdef KI_R36S
                         if (r36s_audio_smooth) {
                             if (paused) {
@@ -1315,6 +1364,51 @@ int main(int argc, char** argv) {
             }
 #endif // !KI_R36S_RELEASE_CLEAN
 #endif
+#ifdef KI_ANDROID
+            if (audio && !turbo && android_audio_smooth) {
+                const auto now_audio = std::chrono::steady_clock::now();
+                const double dt = android_audio_clock_valid
+                    ? std::chrono::duration<double>(now_audio - android_audio_last_vblank).count()
+                    : kFrameSeconds;
+                android_audio_last_vblank = now_audio;
+                android_audio_clock_valid = true;
+                const Uint32 before = SDL_GetQueuedAudioSize(audio);
+                const auto& stretched = android_audio_smoother.process(pcm, dt, before);
+                constexpr Uint32 max_bytes = ki_r36s::AudioSmooth::kRate * 2u *
+                    ki_r36s::AudioSmooth::kMaxQueueMs / 1000u;
+                if (!paused && before < max_bytes && !stretched.empty()) {
+                    if (SDL_QueueAudio(audio, stretched.data(),
+                                       static_cast<Uint32>(stretched.size() * sizeof(int16_t))) != 0) {
+                        __android_log_print(ANDROID_LOG_ERROR, "KI-Audio",
+                                            "SDL_QueueAudio: %s", SDL_GetError());
+                    }
+                }
+                if (!android_audio_primed && !paused &&
+                    SDL_GetQueuedAudioSize(audio) >=
+                        ki_r36s::AudioSmooth::kRate * 2u *
+                        ki_r36s::AudioSmooth::kStartQueueMs / 1000u) {
+                    SDL_PauseAudioDevice(audio, 0);
+                    android_audio_primed = true;
+                    __android_log_print(ANDROID_LOG_INFO, "KI-Audio",
+                                        "Audio primed; playback started");
+                }
+                if (++android_audio_frames % 300 == 0) {
+                    const auto stats = android_audio_smoother.take_stats();
+                    const auto queue_ms = static_cast<unsigned>(
+                        static_cast<uint64_t>(SDL_GetQueuedAudioSize(audio)) * 1000u /
+                        (ki_r36s::AudioSmooth::kRate * 2u));
+                    __android_log_print(ANDROID_LOG_INFO, "KI-Audio",
+                        "queue=%ums min=%ums max=%ums under20=%llu stretch=%.3f in=%llu out=%llu",
+                        queue_ms,
+                        stats.min_queue_ms == 0xffffffffu ? 0u : stats.min_queue_ms,
+                        stats.max_queue_ms,
+                        static_cast<unsigned long long>(stats.low_queue_frames),
+                        stats.stretch,
+                        static_cast<unsigned long long>(stats.input_samples),
+                        static_cast<unsigned long long>(stats.output_samples));
+                }
+            } else
+#endif
 #ifdef KI_R36S
             if (audio && !frame_turbo && r36s_audio_smooth) {
                 const auto now_audio = std::chrono::steady_clock::now();
@@ -1383,6 +1477,8 @@ int main(int argc, char** argv) {
             if (audio && SDL_GetQueuedAudioSize(audio) >
 #ifdef KI_R36S
                 (r36s_audio_smooth ? 31250 * 2 * 16 / 100 : 31250 * 2 * 6 / 100)
+#elif defined(KI_ANDROID)
+                (android_audio_smooth ? 31250 * 2 * 16 / 100 : 31250 * 2 * 6 / 100)
 #else
                 31250 * 2 * 6 / 100
 #endif
@@ -1413,6 +1509,14 @@ int main(int argc, char** argv) {
         } catch (const ki::LoadStateRequest&) {
             entry = state.restore(c);
             if (audio) SDL_ClearQueuedAudio(audio);
+#ifdef KI_ANDROID
+            if (audio && android_audio_smooth) {
+                SDL_PauseAudioDevice(audio, 1);
+                android_audio_smoother.reset();
+                android_audio_primed = false;
+                android_audio_clock_valid = false;
+            }
+#endif
 #ifdef KI_R36S
             if (audio && r36s_audio_smooth) {
                 SDL_PauseAudioDevice(audio, 1);
