@@ -33,6 +33,20 @@ public:
 
     // Runs the DSP up to `dsp_cycles` (10 MHz cycles since power-on).
     void run_until(uint64_t dsp_cycles);
+    // Compare optimized and original ADSP memory paths without changing the
+    // sound firmware or DSP cycle timing. Defaults to fast on KI builds.
+    void enable_fast_memory(bool enabled);
+    // Optional exact KI DSP polling-loop acceleration, independent from
+    // direct-memory mode; exposed for side-by-side regression testing.
+    void enable_ki_waitloop_fastpath(bool enabled);
+    uint64_t waitloop_skipped_cycles() const;
+    uint64_t native_opcode_count() const;
+    // Opt-in host-time accounting of ADSP execution. Disabled in normal game.
+    struct TimingSample { uint64_t host_ns = 0, calls = 0, guest_cycles = 0; };
+    TimingSample take_timing_sample();
+    // Diagnostic-only DSP instruction PC histogram sampled 1 in 1024.
+    void enable_pc_profiling(bool enabled);
+    void log_pc_hotspots(uint64_t guest_frame);
     uint64_t cycles() const { return dsp_.total_cycles(); }
     uint32_t dsp_pc() const { return dsp_.pc(); }
 
@@ -97,6 +111,10 @@ private:
     uint64_t dac_off_since_ = 0;  // DSP cycle since which the DAC has been off
     bool irq1_pending_clear_ = false;
     std::vector<int16_t> samples_;
+
+    // Opt-in profiler; no clock calls, allocations or logging in normal play.
+    bool time_dsp_ = false;
+    TimingSample timing_{};
 
     // internal timer
     bool timer_enable_ = false, timer_ignore_ = false, timer_armed_ = false;

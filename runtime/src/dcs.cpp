@@ -1,7 +1,9 @@
 #include "ki/dcs.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 
 namespace ki {
 
@@ -14,8 +16,89 @@ Dcs::Dcs(const std::vector<std::vector<uint8_t>>& roms)
         for (size_t j = 0; j < roms[k].size() && j < 0x100000; ++j)
             rom_[k * 0x100000 + j] = static_cast<uint16_t>(0xff00 | roms[k][j]);
     rom_banks_ = static_cast<uint32_t>(rom_.size() / 0x1000);
+    time_dsp_ = std::getenv("KI_R36S_TIME_DSP") != nullptr;
+    // U64Emu speedups inspired a cheaper *interpreter* fast path, not a
+    // copy of its firmware-specific HLE. Pointers stay valid for Dcs lifetime.
+    const bool fast = std::getenv("KI_DCS_BASELINE_MEMORY") == nullptr;
+    enable_fast_memory(fast);
+    std::fprintf(stderr, "[dcs] ADSP2105 memory path: %s\n", fast ? "direct-map (fast)" : "virtual Bus (baseline)");
+#ifdef KI_R36S_FAST_DSP
+    const bool fast_loop = std::getenv("KI_DCS_BASELINE_HOTLOOP") == nullptr;
+#else
+    const bool fast_loop = false;
+#endif
+    enable_ki_waitloop_fastpath(fast_loop);
+    std::fprintf(stderr, "[dcs] ADSP2105 KI verified waitloop accelerator: %s\n",
+                 fast_loop ? "ON" : "OFF");
+#ifdef KI_R36S_FAST_DSP
+    const bool native = std::getenv("KI_R36S_DSP_COMPILED") != nullptr;
+#else
+    const bool native = false;
+#endif
+    // Experimental only. The ordinary launcher runs the validated baseline.
+    // Program-memory opcode guards ensure modified firmware is interpreted.
+    dsp_.enable_native_opcodes(native);
+    std::fprintf(stderr, "[dcs] ADSP2105 compiled opcode experiment: %s\n",
+                 native ? "ON" : "OFF");
     board_reset();
     dsp_.reset();
+}
+
+void Dcs::enable_fast_memory(bool enabled) {
+    if (!enabled) {
+        dsp_.set_dcs_fast_map({});
+        return;
+    }
+    adsp::Adsp2105::DcsFastMap map{};
+    map.internal_pram = internal_pram_.data();
+    map.external_pram = external_pram_.data();
+    map.internal_dram = internal_dram_.data();
+    map.sample_rom = rom_.data();
+    map.sample_bank = &bank_;
+    map.sample_banks = rom_banks_;
+    dsp_.set_dcs_fast_map(map);
+}
+
+void Dcs::enable_ki_waitloop_fastpath(bool enabled) {
+    dsp_.enable_ki_waitloop_fastpath(enabled);
+}
+
+uint64_t Dcs::waitloop_skipped_cycles() const {
+    return dsp_.ki_waitloop_skipped_cycles();
+}
+
+uint64_t Dcs::native_opcode_count() const {
+    return dsp_.native_opcode_count();
+}
+
+Dcs::TimingSample Dcs::take_timing_sample() {
+    TimingSample result = timing_;
+    timing_ = {};
+    return result;
+}
+
+void Dcs::enable_pc_profiling(bool enabled) {
+    dsp_.enable_pc_profiling(enabled);
+    std::fprintf(stderr, "[dcs] DSP PC sampling: %s (1/1024, diagnostic only)\n",
+                 enabled ? "ON" : "OFF");
+}
+
+void Dcs::log_pc_hotspots(uint64_t guest_frame) {
+    uint32_t sampled = 0;
+    auto hotspots = dsp_.take_pc_hotspots(12, sampled);
+    std::fprintf(stderr,
+        "[r36s] DSP_HOT frame=%llu dsp_cycles=%llu sampled=%u top=",
+        static_cast<unsigned long long>(guest_frame),
+        static_cast<unsigned long long>(dsp_.total_cycles()), sampled);
+    for (std::size_t i = 0; i < hotspots.size(); ++i) {
+        const auto& hot = hotspots[i];
+        const double percent = sampled ? (100.0 * hot.second / sampled) : 0.0;
+        std::fprintf(stderr, "%s%04x/%06x:%u(%.1f%%)",
+                     i ? "," : "", static_cast<unsigned>(hot.first),
+                     static_cast<unsigned>(program_read(hot.first) & 0xffffffu),
+                     hot.second, percent);
+    }
+    std::fprintf(stderr, "\n");
 }
 
 void Dcs::copy_state_from(const Dcs& o) {
@@ -63,6 +146,13 @@ void Dcs::reset_w(bool state) {
 }
 
 void Dcs::data_w(uint16_t data) {
+    // Optional timing trace for future HLE equivalence tests. This records
+    // the command without changing any IRQ, latch or audio behavior.
+    static const bool audio_trace = std::getenv("KI_R36S_AUDIO_TRACE") != nullptr;
+    if (audio_trace)
+        std::fprintf(stderr, "[dcs] CMD cycle=%llu value=0x%04x was_empty=%d\n",
+                     static_cast<unsigned long long>(dsp_.total_cycles()),
+                     static_cast<unsigned>(data), !!(latch_control_ & kInputEmpty));
     // MAME dcs_delayed_data_w: IRQ2 on, input latch full.
     dsp_.set_input(adsp::kIrq2, true);
     latch_control_ &= ~kInputEmpty;
@@ -102,6 +192,12 @@ void Dcs::boot() {
 // ---- scheduling --------------------------------------------------------------
 
 void Dcs::run_until(uint64_t target) {
+    // Diagnostic-only steady_clock attribution. This function is reached
+    // through several KI sound MMIO paths as well as KinstBoard::update.
+    // Guard before clock access to keep regular builds unaffected.
+    std::chrono::steady_clock::time_point begin;
+    const uint64_t before = time_dsp_ ? dsp_.total_cycles() : 0;
+    if (time_dsp_) begin = std::chrono::steady_clock::now();
     while (dsp_.total_cycles() < target) {
         uint64_t now = dsp_.total_cycles();
         uint64_t stop = target;
@@ -122,6 +218,13 @@ void Dcs::run_until(uint64_t target) {
             transfer_half_buffer();
         }
         if (timer_armed_ && now >= next_timer_) timer_fire();
+    }
+    if (time_dsp_) {
+        const auto elapsed = std::chrono::steady_clock::now() - begin;
+        timing_.host_ns += static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count());
+        timing_.guest_cycles += dsp_.total_cycles() - before;
+        ++timing_.calls;
     }
 }
 

@@ -10,7 +10,12 @@
 // Only the ADSP-2101 family behaviour (ADSP-2105 configuration) is kept.
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <utility>
+#include <vector>
 
 #define LSB_FIRST 1
 
@@ -41,9 +46,42 @@ class Adsp2105 {
 public:
     explicit Adsp2105(Bus& bus);
 
+    // Optional zero-copy memory map for the KI DCS board. Direct pointers
+    // bypass the per-instruction virtual Bus calls while preserving the
+    // original 2K/2K address mirrors and I/O side effects in the fallback.
+    // The board owns the arrays; their addresses must remain stable.
+    struct DcsFastMap {
+        uint32_t* internal_pram = nullptr;  // 0x0000..0x03ff
+        uint32_t* external_pram = nullptr;  // 0x0800..0x1fff, repeated 0x800
+        uint16_t* internal_dram = nullptr;  // 0x3800..0x39ff
+        const uint16_t* sample_rom = nullptr; // 0x2000..0x2fff
+        const uint32_t* sample_bank = nullptr;
+        uint32_t sample_banks = 0;
+    };
+    void set_dcs_fast_map(DcsFastMap map) { m_dcs_fast = map; }
+
     void reset();
     // Runs at least `cycles` instructions (one cycle each), returns the number run.
     int run(int cycles);
+    // Diagnostic only: sample one of every 1024 executed instructions.
+    // Memory is allocated only when profiling is explicitly enabled.
+    // This does not change emulated DSP cycles or instruction semantics.
+    void enable_pc_profiling(bool enable);
+    // KI L1.5D DSP polling-loop accelerator. Executes a verified 3-op block,
+    // then skips identical pure repeats to the end of the current DSP slice.
+    // All skipped cycles remain accounted for; original interpreter is fallback.
+    void enable_ki_waitloop_fastpath(bool enabled) { m_ki_waitloop_fastpath = enabled; }
+    uint64_t ki_waitloop_skipped_cycles() const { return m_ki_waitloop_skipped_cycles; }
+    // Experimental, precompiled KI1 ADSP opcode path. OFF by default.
+    // Specializations are compiled privately from the user's sound ROM,
+    // but every execution is guarded by its current program-memory word.
+    void enable_native_opcodes(bool enabled) { m_native_opcode_enabled = enabled; }
+    uint64_t native_opcode_count() const { return m_native_opcode_count; }
+    // ROM-free regression aid: compare guest-visible state, excluding host
+    // pointers and diagnostic counters. Never used during normal gameplay.
+    bool guest_state_equals(const Adsp2105& other) const;
+    std::vector<std::pair<uint16_t, uint32_t>> take_pc_hotspots(
+        std::size_t max_entries, uint32_t& sampled_instructions);
     // Interrupt input level (MAME execute_set_input semantics: a rising edge latches).
     void set_input(int line, bool asserted);
     // Holds the core in reset while asserted; releasing it resets the core.
@@ -87,6 +125,20 @@ private:
            ADSP2181_SPORT0_TX = 4, ADSP2181_TIMER = 5, ADSP2181_IRQE = 6, ADSP2181_BDMA = 7 };
 
     Bus& m_bus;
+    DcsFastMap m_dcs_fast{};
+    bool m_ki_waitloop_fastpath = false;
+    uint64_t m_ki_waitloop_skipped_cycles = 0;
+    bool try_ki_waitloop();
+    bool m_native_opcode_enabled = false;
+    uint64_t m_native_opcode_count = 0;
+    bool try_native_opcode(uint32_t opcode);
+    template<uint32_t Opcode> void execute_native_opcode();
+    struct PcProfiler {
+        std::array<uint32_t, 0x4000> counts{};
+        uint32_t counter = 0;
+        uint32_t sampled = 0;
+    };
+    std::unique_ptr<PcProfiler> m_pc_profiler;
     bool m_in_reset = false;
     bool m_running = false;
     int m_slice = 0;
@@ -133,13 +185,48 @@ private:
     void shift_op(uint32_t op);
     void shift_op_imm(uint32_t op);
 
-    uint16_t data_read(uint32_t addr) { return m_bus.data_read(addr); }
-    void data_write(uint32_t addr, uint16_t data) { m_bus.data_write(addr, data); }
+    // The optional direct map exactly matches Dcs::data_read/write and
+    // Dcs::program_read/write. Other boards keep the original Bus path.
+    // The fallback is mandatory for I/O registers (input latch, timer, etc.).
+    uint16_t data_read(uint32_t addr) {
+        if (!m_dcs_fast.external_pram) return m_bus.data_read(addr);
+        addr &= 0x3fff;
+        if (addr < 0x2000) return static_cast<uint16_t>(m_dcs_fast.external_pram[addr & 0x7ff] >> 8);
+        if (addr < 0x3000)
+            return m_dcs_fast.sample_rom[
+                ((*m_dcs_fast.sample_bank % m_dcs_fast.sample_banks) << 12) | (addr & 0xfff)];
+        if (addr >= 0x3800 && addr < 0x3a00) return m_dcs_fast.internal_dram[addr - 0x3800];
+        return m_bus.data_read(addr);
+    }
+    void data_write(uint32_t addr, uint16_t value) {
+        if (!m_dcs_fast.external_pram) { m_bus.data_write(addr, value); return; }
+        addr &= 0x3fff;
+        if (addr < 0x2000) {
+            uint32_t& w = m_dcs_fast.external_pram[addr & 0x7ff];
+            w = (static_cast<uint32_t>(value) << 8) | (w & 0xff);
+        } else if (addr >= 0x3800 && addr < 0x3a00) {
+            m_dcs_fast.internal_dram[addr - 0x3800] = value;
+        } else {
+            m_bus.data_write(addr, value);
+        }
+    }
     uint16_t io_read(uint32_t) { return 0xffff; }
     void io_write(uint32_t, uint16_t) {}
-    uint32_t program_read(uint32_t addr) { return m_bus.program_read(addr); }
-    void program_write(uint32_t addr, uint32_t data) { m_bus.program_write(addr, data & 0xffffff); }
-    uint32_t opcode_read() { return m_bus.program_read(m_pc); }
+    uint32_t program_read(uint32_t addr) {
+        if (!m_dcs_fast.external_pram) return m_bus.program_read(addr);
+        addr &= 0x3fff;
+        if (addr < 0x400) return m_dcs_fast.internal_pram[addr];
+        if (addr >= 0x800 && addr < 0x2000) return m_dcs_fast.external_pram[addr & 0x7ff];
+        return 0;
+    }
+    void program_write(uint32_t addr, uint32_t value) {
+        value &= 0xffffff;
+        if (!m_dcs_fast.external_pram) { m_bus.program_write(addr, value); return; }
+        addr &= 0x3fff;
+        if (addr < 0x400) m_dcs_fast.internal_pram[addr] = value;
+        else if (addr >= 0x800 && addr < 0x2000) m_dcs_fast.external_pram[addr & 0x7ff] = value;
+    }
+    uint32_t opcode_read() { return program_read(m_pc); }
 
     inline void update_i(int which);
     inline void update_l(int which);

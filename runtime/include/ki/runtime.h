@@ -43,6 +43,9 @@ struct IoHandler {
     virtual uint32_t interrupt_lines(Context&) { return 0; }
     // Cycle count at which the board next needs attention (line changes, frames).
     virtual uint64_t next_event(Context&) { return ~0ull; }
+    // Earliest observable change to an IRQ line, including end of VBlank.
+    // Only consulted by the experimental MIPS busy-loop accelerator.
+    virtual uint64_t irq_edge(Context& c) { return next_event(c); }
     // Called from safe points once ctx.cycles reaches next_event().
     virtual void update(Context&) {}
 };
@@ -85,6 +88,15 @@ struct Context {
     std::vector<uint8_t> sram = std::vector<uint8_t>(kSramSize);
     std::vector<uint8_t> dram = std::vector<uint8_t>(kDramSize);
     IoHandler* io = nullptr;
+    // R36S-only opt-in fast COP0 reads. The original mfc0() remains available
+    // for side-by-side hardware comparison and every other platform.
+    bool fast_cop0 = false;
+    bool fast_mips_idle = false;
+    // Guest memory fast path uses proved physical KSEG/zero-page RAM ranges.
+    // Kept switchable for on-device A/B performance and regression checks.
+    bool fast_mips_memory = false;
+    uint64_t mips_idle_skipped_cycles = 0;
+    uint64_t mips_idle_skipped_iterations = 0;
 };
 
 // Raised for guest exceptions. Exception delivery to the guest's own vector is
@@ -115,6 +127,10 @@ extern const FuncEntry kBootFunctionTable[];
 extern const std::size_t kBootFunctionTableSize;
 void set_boot_function_table(const FuncEntry* table, std::size_t size);
 RecompFunc lookup_function(uint32_t vaddr);
+// Test20 ROM-free counter checks; reported only with
+// KI_R36S_DISPATCH_PROFILE=1. Does not mutate emulator state.
+struct DispatchStats { uint64_t hits = 0, misses = 0; };
+DispatchStats dispatch_cache_take_stats();
 
 inline void tail(Context& c, RecompFunc fn) { c.tail_fn = fn; }
 void tail_indirect(Context& c, uint32_t target, uint32_t pc);
@@ -242,6 +258,79 @@ inline void store(Context& c, uint32_t vaddr, T value, uint32_t pc) {
         io_write(c, vaddr, sizeof(T), value);
 }
 
+// R36S native recompiler memory fast-path. The existing load/store() above
+// are the reference semantics for all platforms. This specializes the common
+// SRAM, DRAM and zero-page RAM accesses into a constant-size memcpy with no
+// dynamic segment translation, virtual I/O call or guest exception path.
+// Unaligned or invalid accesses ALWAYS call the reference implementation.
+// KI_MEM_PROBE diagnostics remain fully observable by bypassing this path.
+template <typename T>
+inline T load_recompiled(Context& c, uint32_t vaddr, uint32_t pc) {
+#ifdef KI_R36S_FAST_MEMORY
+    if (c.fast_mips_memory) {
+#ifdef KI_MEM_PROBE
+        if (!g_mem_probe)
+#endif
+        {
+            if ((vaddr & (sizeof(T) - 1)) == 0) {
+                const uint32_t segment = vaddr & 0xe0000000u;
+                if (segment == 0x80000000u || segment == 0xa0000000u) {
+                    const uint32_t phys = vaddr & 0x1fffffffu;
+                    if (phys <= kSramSize - sizeof(T)) {
+                        T v;
+                        std::memcpy(&v, c.sram.data() + phys, sizeof(T));
+                        return v;
+                    }
+                    const uint32_t dram_offset = phys - kDramBase;
+                    if (dram_offset <= kDramSize - sizeof(T)) {
+                        T v;
+                        std::memcpy(&v, c.dram.data() + dram_offset, sizeof(T));
+                        return v;
+                    }
+                } else if (vaddr <= kZeroPageSize - sizeof(T)) {
+                    T v;
+                    std::memcpy(&v, c.dram.data() + kZeroPagePhys - kDramBase + vaddr, sizeof(T));
+                    return v;
+                }
+            }
+        }
+    }
+#endif
+    return load<T>(c, vaddr, pc);
+}
+
+template <typename T>
+inline void store_recompiled(Context& c, uint32_t vaddr, T value, uint32_t pc) {
+#ifdef KI_R36S_FAST_MEMORY
+    if (c.fast_mips_memory) {
+#ifdef KI_MEM_PROBE
+        if (!g_mem_probe)
+#endif
+        {
+            if ((vaddr & (sizeof(T) - 1)) == 0) {
+                const uint32_t segment = vaddr & 0xe0000000u;
+                if (segment == 0x80000000u || segment == 0xa0000000u) {
+                    const uint32_t phys = vaddr & 0x1fffffffu;
+                    if (phys <= kSramSize - sizeof(T)) {
+                        std::memcpy(c.sram.data() + phys, &value, sizeof(T));
+                        return;
+                    }
+                    const uint32_t dram_offset = phys - kDramBase;
+                    if (dram_offset <= kDramSize - sizeof(T)) {
+                        std::memcpy(c.dram.data() + dram_offset, &value, sizeof(T));
+                        return;
+                    }
+                } else if (vaddr <= kZeroPageSize - sizeof(T)) {
+                    std::memcpy(c.dram.data() + kZeroPagePhys - kDramBase + vaddr, &value, sizeof(T));
+                    return;
+                }
+            }
+        }
+    }
+#endif
+    store<T>(c, vaddr, value, pc);
+}
+
 // Unaligned word/doubleword halves, little-endian semantics (MIPS III manual,
 // LWL/LWR/LDL/LDR/SWL/SWR/SDL/SDR with BigEndianCPU = 0).
 uint64_t lwl(Context& c, uint64_t rt, uint32_t vaddr, uint32_t pc);
@@ -252,6 +341,58 @@ void swl(Context& c, uint64_t rt, uint32_t vaddr, uint32_t pc);
 void swr(Context& c, uint64_t rt, uint32_t vaddr, uint32_t pc);
 void sdl(Context& c, uint64_t rt, uint32_t vaddr, uint32_t pc);
 void sdr(Context& c, uint64_t rt, uint32_t vaddr, uint32_t pc);
+
+// The regular MIPS unaligned helpers are out-of-line and therefore expensive
+// on Cortex-A35. Inline their exact little-endian half-access semantics in
+// generated code while retaining original functions as the baseline.
+inline uint64_t lwl_recompiled(Context& c, uint64_t rt, uint32_t a, uint32_t pc) {
+#ifdef KI_R36S_FAST_MEMORY
+    if (c.fast_mips_memory) {
+        const unsigned sh = 8u * (3u - (a & 3u));
+        const uint32_t word = load_recompiled<uint32_t>(c, a & ~3u, pc);
+        const uint32_t mask = 0xffffffffu << sh;
+        return sx32((lo32(rt) & ~mask) | (word << sh));
+    }
+#endif
+    return lwl(c, rt, a, pc);
+}
+inline uint64_t lwr_recompiled(Context& c, uint64_t rt, uint32_t a, uint32_t pc) {
+#ifdef KI_R36S_FAST_MEMORY
+    if (c.fast_mips_memory) {
+        const unsigned sh = 8u * (a & 3u);
+        const uint32_t word = load_recompiled<uint32_t>(c, a & ~3u, pc);
+        const uint32_t mask = 0xffffffffu >> sh;
+        return sx32((lo32(rt) & ~mask) | (word >> sh));
+    }
+#endif
+    return lwr(c, rt, a, pc);
+}
+inline uint64_t ldl_recompiled(Context& c, uint64_t rt, uint32_t a, uint32_t pc) {
+#ifdef KI_R36S_FAST_MEMORY
+    if (c.fast_mips_memory) {
+        const unsigned k = a & 7u;
+        const uint64_t word = k <= 3
+          ? load_recompiled<uint32_t>(c, a & ~7u, pc)
+          : load_recompiled<uint64_t>(c, a & ~7u, pc);
+        const unsigned sh = 8u * (7u - k);
+        return (rt & ~(~0ull << sh)) | (word << sh);
+    }
+#endif
+    return ldl(c, rt, a, pc);
+}
+inline uint64_t ldr_recompiled(Context& c, uint64_t rt, uint32_t a, uint32_t pc) {
+#ifdef KI_R36S_FAST_MEMORY
+    if (c.fast_mips_memory) {
+        const unsigned k = a & 7u;
+        const uint64_t word = k >= 4
+          ? static_cast<uint64_t>(load_recompiled<uint32_t>(c, (a & ~7u) + 4u, pc)) << 32
+          : load_recompiled<uint64_t>(c, a & ~7u, pc);
+        const unsigned sh = 8u * k;
+        return (rt & ~(~0ull >> sh)) | (word >> sh);
+    }
+#endif
+    return ldr(c, rt, a, pc);
+}
 
 // ---- coprocessor 1 (single precision) --------------------------------------
 // Host float arithmetic is IEEE-754 binary32 with no excess precision on the
@@ -317,10 +458,66 @@ void service(Context& c, uint32_t pc);
 inline void poll(Context& c, uint32_t pc) {
     if (c.cycles >= c.next_event) service(c, pc);
 }
+
+// Hardware event-driven idle loop: invoked ONLY by the recompiler after an
+// exact verified 5-instruction MFC0 Cause / NOP / ANDI / BEQ/BNE / delay
+// pattern has completed a *taken* backward branch. CPU cycles are conserved.
+// We only skip additional repetitions that cannot observe an IRQ change.
+// All remaining iterations, interrupts and delay slots are interpreted by
+// the original generated MIPS code.
+inline void poll_irq_idle(Context& c, uint32_t pc, uint32_t mask,
+                          unsigned tested_reg, unsigned counter_reg,
+                          int counter_imm, unsigned loop_cycles = 6) {
+    poll(c, pc);
+    if (!c.fast_mips_idle || !c.io || loop_cycles == 0) return;
+    const uint32_t current =
+        (lo32(c.cp0[kCp0Cause]) & (mask & ~0x7c00u)) |
+        (c.io->interrupt_lines(c) & (mask & 0x7c00u));
+    // An IRQ may have changed BETWEEN the mfc0 at loop entry and the
+    // branch's delay slot. If so, the very next real loop must inspect it.
+    if ((lo32(c.r[tested_reg]) & mask) != (current & mask)) return;
+    const uint64_t edge = c.io->irq_edge(c);
+    const uint64_t deadline = edge < c.next_event ? edge : c.next_event;
+    if (deadline <= c.cycles) return;
+    // Stop BEFORE the next IRQ edge. The ordinary code then completes
+    // the final iteration and passes through its normal interrupt safepoint.
+    uint64_t repeats = (deadline - c.cycles - 1) / loop_cycles;
+    if (repeats == 0) return;
+    // Bounded guard against malformed firmware event deadlines.
+    if (repeats > 300000) repeats = 300000;
+    c.cycles += repeats * loop_cycles;
+    if (counter_reg != 0) {
+        const uint32_t next = lo32(c.r[counter_reg]) +
+            static_cast<uint32_t>(counter_imm) * static_cast<uint32_t>(repeats);
+        c.r[counter_reg] = sx32(next);
+    }
+    c.mips_idle_skipped_cycles += repeats * loop_cycles;
+    c.mips_idle_skipped_iterations += repeats;
+}
 void schedule(Context& c);  // recompute next_event after state changes
 void eret(Context& c);
 
 uint64_t mfc0(Context& c, unsigned reg, uint32_t pc);
+// The statically generated KI translation calls this wrapper. On R36S
+// Release, the most frequent COP0 reads can be inlined at their call sites
+// (reg is a compile-time constant), removing a cross-translation-unit call
+// and reg switch. All semantics match mfc0(); no guest cycles are changed.
+inline uint64_t mfc0_recompiled(Context& c, unsigned reg, uint32_t pc) {
+#ifdef KI_R36S_FAST_COP0
+    if (c.fast_cop0) {
+        if (reg == kCp0Cause) {
+            uint32_t cause = lo32(c.cp0[kCp0Cause]) & ~0x7c00u;
+            if (c.io) cause |= c.io->interrupt_lines(c) & 0x7c00u;
+            return cause;
+        }
+        if (reg == kCp0Count)
+            return static_cast<uint32_t>(c.count_base + c.cycles / 2);
+        if (reg == kCp0PRId) return 0x2020;
+        return c.cp0[reg & 31];
+    }
+#endif
+    return mfc0(c, reg, pc);
+}
 void mtc0(Context& c, unsigned reg, uint64_t value, uint32_t pc);
 void cop0_op(Context& c, uint32_t instr, uint32_t pc);  // tlbwi, tlbr, eret, ...
 void cache_op(Context& c, unsigned op, uint32_t vaddr, uint32_t pc);

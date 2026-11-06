@@ -373,6 +373,255 @@ void Adsp2105::set_ireg(int n, uint32_t v)
 	update_i(n);
 }
 
+void Adsp2105::enable_pc_profiling(bool enable)
+{
+    if (enable) m_pc_profiler = std::make_unique<PcProfiler>();
+    else m_pc_profiler.reset();
+}
+
+std::vector<std::pair<uint16_t, uint32_t>> Adsp2105::take_pc_hotspots(
+    std::size_t max_entries, uint32_t& sampled_instructions)
+{
+    sampled_instructions = 0;
+    std::vector<std::pair<uint16_t, uint32_t>> top;
+    if (!m_pc_profiler) return top;
+    PcProfiler& prof = *m_pc_profiler;
+    sampled_instructions = prof.sampled;
+    top.reserve(max_entries);
+    for (uint32_t pc = 0; pc < prof.counts.size(); ++pc) {
+        const uint32_t count = prof.counts[pc];
+        if (!count) continue;
+        auto pos = top.begin();
+        while (pos != top.end() &&
+               (pos->second > count || (pos->second == count && pos->first < pc)))
+            ++pos;
+        if (top.size() < max_entries || pos != top.end()) {
+            top.insert(pos, {static_cast<uint16_t>(pc), count});
+            if (top.size() > max_entries) top.pop_back();
+        }
+    }
+    prof.counts.fill(0);
+    prof.sampled = 0;
+    return top;
+}
+
+// KI L1.5D's DCS firmware spends most instruction cycles in two tiny
+// three-instruction register/ALU/branch polling loops. Never fast-forward
+// those based on PC alone: program RAM is writable and other ADSP firmwares
+// may execute completely different code at these addresses.
+bool Adsp2105::try_ki_waitloop()
+{
+    if (!m_ki_waitloop_fastpath || m_pc_profiler || m_icount < 3)
+        return false;
+#if ADSP_TRACK_HOTSPOTS
+    return false; // Never omit instructions when full PC tracing is enabled.
+#endif
+    const uint32_t base = m_pc;
+    if (base != 0x0130 && base != 0x0136)
+        return false;
+    // A hardware DO/UNTIL loop would alter the PC/stack at its final word.
+    // Fall back to the interpreter when one covers any of these three PCs.
+    if (m_loop >= base && m_loop <= base + 2)
+        return false;
+    const uint32_t branch = base == 0x0130 ? 0x181305u : 0x181364u;
+    // Verify all three instructions every time we enter the fast path:
+    // the DSP's instruction memory can be rewritten at runtime.
+    if (program_read(base) != 0x0d02a3u ||
+        program_read(base + 1) != 0x26e20fu ||
+        program_read(base + 2) != branch)
+        return false;
+
+    // EXACT original effects of 0d02a3: AR <- register group 2, index 3.
+    m_ppc = base;
+    m_pc = base + 1;
+    write_reg0(0x0a, read_reg2(0x03));
+
+    // EXACT original effects of 26e20f: unconditional ALU to AF.
+    m_ppc = base + 1;
+    m_pc = base + 2;
+    if (condition(0x0f))
+        alu_op_af(0x26e20fu);
+
+    // EXACT original effects of 181305/181364: conditional immediate jump
+    // to the beginning of this three-instruction block.
+    m_ppc = base + 2;
+    m_pc = base + 3;
+    const uint32_t cond = branch & 0x0fu;
+    if (condition(cond))
+        m_pc = base;
+
+    m_icount -= 3;
+    if (m_pc == base && m_icount >= 3) {
+        // No Bus I/O, timer, memory write, index change, or host callback
+        // occurs in these exact three ops. With I7/AY0 unchanged, their
+        // register/ASTAT result and branch condition repeat identically.
+        // All external DSP IRQ/DAC events are scheduled at run() boundaries
+        // by Dcs::run_until; never cross the current instruction budget.
+        const int skipped = (m_icount / 3) * 3;
+        m_icount -= skipped;
+        m_ki_waitloop_skipped_cycles += static_cast<uint64_t>(skipped);
+        // Final m_ppc remains the branch PC and m_pc remains the loop head,
+        // exactly as if the repeated blocks had run individually.
+    }
+    return true;
+}
+
+bool Adsp2105::guest_state_equals(const Adsp2105& o) const
+{
+    // Compare emulated registers, stacks, flags, timers and cycle counter.
+    // This deliberately excludes host pointers (which differ per instance)
+    // and diagnostic fastpath counters (which should differ).
+    return m_chip_type == o.m_chip_type &&
+        m_pc == o.m_pc && m_ppc == o.m_ppc &&
+        m_loop == o.m_loop && m_loop_condition == o.m_loop_condition &&
+        m_cntr == o.m_cntr && m_astat == o.m_astat &&
+        m_sstat == o.m_sstat && m_mstat == o.m_mstat &&
+        m_mstat_prev == o.m_mstat_prev && m_astat_clear == o.m_astat_clear &&
+        m_idle == o.m_idle &&
+        std::memcmp(&m_core, &o.m_core, sizeof m_core) == 0 &&
+        std::memcmp(&m_alt, &o.m_alt, sizeof m_alt) == 0 &&
+        std::memcmp(m_i, o.m_i, sizeof m_i) == 0 &&
+        std::memcmp(m_m, o.m_m, sizeof m_m) == 0 &&
+        std::memcmp(m_l, o.m_l, sizeof m_l) == 0 &&
+        std::memcmp(m_lmask, o.m_lmask, sizeof m_lmask) == 0 &&
+        std::memcmp(m_base, o.m_base, sizeof m_base) == 0 &&
+        m_px == o.m_px && m_pmovlay == o.m_pmovlay &&
+        m_dmovlay == o.m_dmovlay &&
+        std::memcmp(m_loop_stack, o.m_loop_stack, sizeof m_loop_stack) == 0 &&
+        std::memcmp(m_cntr_stack, o.m_cntr_stack, sizeof m_cntr_stack) == 0 &&
+        std::memcmp(m_pc_stack, o.m_pc_stack, sizeof m_pc_stack) == 0 &&
+        std::memcmp(m_stat_stack, o.m_stat_stack, sizeof m_stat_stack) == 0 &&
+        m_pc_sp == o.m_pc_sp && m_cntr_sp == o.m_cntr_sp &&
+        m_stat_sp == o.m_stat_sp && m_loop_sp == o.m_loop_sp &&
+        m_flagout == o.m_flagout && m_flagin == o.m_flagin &&
+        m_fl0 == o.m_fl0 && m_fl1 == o.m_fl1 && m_fl2 == o.m_fl2 &&
+        m_imask == o.m_imask && m_icntl == o.m_icntl &&
+        m_ifc == o.m_ifc &&
+        std::memcmp(m_irq_state, o.m_irq_state, sizeof m_irq_state) == 0 &&
+        std::memcmp(m_irq_latch, o.m_irq_latch, sizeof m_irq_latch) == 0 &&
+        m_icount == o.m_icount && m_in_reset == o.m_in_reset &&
+        m_total_cycles == o.m_total_cycles;
+}
+
+// Experimental, ahead-of-time specialization of selected ADSP-2105
+// instruction families. The C++ compiler sees each 24-bit instruction as a
+// constant and can eliminate its opcode decode. These operations intentionally
+// reuse the same MAME-derived register, ALU/MAC, DAG and condition helpers as
+// the interpreter, preserving guest-visible side effects and cycle semantics.
+// Only verified opcode/PC pairs from a private ROM build enter this path.
+template<uint32_t Opcode>
+inline void Adsp2105::execute_native_opcode()
+{
+    constexpr uint32_t op = Opcode;
+    constexpr uint32_t g = (op >> 16) & 0xffu;
+    if constexpr (g == 0x0d) {
+        constexpr uint32_t sub = (op >> 8) & 15u;
+        constexpr int dst = (op >> 4) & 15u, src = op & 15u;
+        if constexpr (sub == 0) write_reg0(dst, read_reg0(src));
+        else if constexpr (sub == 1) write_reg0(dst, read_reg1(src));
+        else if constexpr (sub == 2) write_reg0(dst, read_reg2(src));
+        else if constexpr (sub == 3) write_reg0(dst, read_reg3(src));
+        else if constexpr (sub == 4) write_reg1(dst, read_reg0(src));
+        else if constexpr (sub == 5) write_reg1(dst, read_reg1(src));
+        else if constexpr (sub == 6) write_reg1(dst, read_reg2(src));
+        else if constexpr (sub == 7) write_reg1(dst, read_reg3(src));
+        else if constexpr (sub == 8) write_reg2(dst, read_reg0(src));
+        else if constexpr (sub == 9) write_reg2(dst, read_reg1(src));
+        else if constexpr (sub == 10) write_reg2(dst, read_reg2(src));
+        else if constexpr (sub == 11) write_reg2(dst, read_reg3(src));
+        else if constexpr (sub == 12) write_reg3(dst, read_reg0(src));
+        else if constexpr (sub == 13) write_reg3(dst, read_reg1(src));
+        else if constexpr (sub == 14) write_reg3(dst, read_reg2(src));
+        else write_reg3(dst, read_reg3(src));
+    } else if constexpr (g >= 0x18 && g <= 0x1b) {
+        if (condition(op & 15u)) {
+            m_pc = (op >> 4) & 0x3fffu;
+            if (m_pc == m_ppc) m_icount = 0; // MAME busy-loop behavior
+        }
+    } else if constexpr (g >= 0x20 && g <= 0x27) {
+        if (condition(op & 15u)) {
+            if constexpr (g == 0x20 || g == 0x21) {
+                if (m_chip_type >= CHIP_TYPE_ADSP2181 && (op & 0x0018f0u) == 0x000010u)
+                    mac_op_mr_xop(op);
+                else mac_op_mr(op);
+            } else if constexpr (g == 0x22 || g == 0x23) {
+                if (m_chip_type >= CHIP_TYPE_ADSP2181 && BIT(op, 4))
+                    alu_op_ar_const(op);
+                else alu_op_ar(op);
+            } else if constexpr (g == 0x24 || g == 0x25) {
+                if (m_chip_type >= CHIP_TYPE_ADSP2181 && (op & 0x0018f0u) == 0x000010u)
+                    mac_op_mf_xop(op);
+                else mac_op_mf(op);
+            } else {
+                if (m_chip_type >= CHIP_TYPE_ADSP2181 && BIT(op, 4))
+                    alu_op_af_const(op);
+                else alu_op_af(op);
+            }
+        }
+    } else if constexpr (g >= 0x30 && g <= 0x3f) {
+        constexpr int dst = op & 15u;
+        constexpr int32_t imm = sext(op >> 4, 14);
+        if constexpr (g <= 0x33) write_reg0(dst, imm);
+        else if constexpr (g <= 0x37) write_reg1(dst, imm);
+        else if constexpr (g <= 0x3b) write_reg2(dst, imm);
+        else write_reg3(dst, imm);
+    } else if constexpr (g >= 0x40 && g <= 0x4f) {
+        write_reg0(op & 15u, (op >> 4) & 0xffffu);
+    } else if constexpr (g >= 0x60 && g <= 0x7f) {
+        // The ADSP parallel MAC/ALU + DAG read/write instruction families
+        // MUST perform the two operations in their original execution order.
+        constexpr uint32_t sub = (g - 0x60u) >> 1;
+        if constexpr (sub >= 4 && sub <= 7) {
+            if constexpr ((sub & 1) == 0) {
+                data_write_dag1(op, read_reg0(BIT(op, 4, 4)));
+                if constexpr (sub == 4) mac_op_mr(op);
+                else mac_op_mf(op);
+            } else {
+                data_write_dag1(op, read_reg0(BIT(op, 4, 4)));
+                if constexpr (sub == 5) alu_op_ar(op);
+                else alu_op_af(op);
+            }
+        } else if constexpr (sub >= 12) {
+            data_write_dag2(op, read_reg0(BIT(op, 4, 4)));
+            if constexpr (sub == 12) mac_op_mr(op);
+            else if constexpr (sub == 13) alu_op_ar(op);
+            else if constexpr (sub == 14) mac_op_mf(op);
+            else alu_op_af(op);
+        } else {
+            if constexpr (sub == 0 || sub == 8) mac_op_mr(op);
+            else if constexpr (sub == 1 || sub == 9) alu_op_ar(op);
+            else if constexpr (sub == 2 || sub == 10) mac_op_mf(op);
+            else alu_op_af(op);
+            const uint32_t value = (sub < 8) ? data_read_dag1(op) : data_read_dag2(op);
+            write_reg0(BIT(op, 4, 4), value);
+        }
+    } else if constexpr (g >= 0x80 && g <= 0x9f) {
+        constexpr uint32_t addr = (op >> 4) & 0x3fffu;
+        constexpr int reg = op & 15u;
+        if constexpr (g <= 0x83) write_reg0(reg, data_read(addr));
+        else if constexpr (g <= 0x87) write_reg1(reg, data_read(addr));
+        else if constexpr (g <= 0x8b) write_reg2(reg, data_read(addr));
+        else if constexpr (g <= 0x8f) write_reg3(reg, data_read(addr));
+        else if constexpr (g <= 0x93) data_write(addr, read_reg0(reg));
+        else if constexpr (g <= 0x97) data_write(addr, read_reg1(reg));
+        else if constexpr (g <= 0x9b) data_write(addr, read_reg2(reg));
+        else data_write(addr, read_reg3(reg));
+    }
+}
+
+bool Adsp2105::try_native_opcode(uint32_t op)
+{
+#ifdef KI_ADSP_NATIVE_IMAGE
+    switch (m_ppc & 0x3fffu) {
+#include "ki_adsp_native.inc"
+    default: break;
+    }
+#else
+    (void)op;
+#endif
+    return false;
+}
+
 int Adsp2105::run(int cycles)
 {
 	if (m_in_reset)
@@ -393,8 +642,21 @@ int Adsp2105::run(int cycles)
 
 	do
 	{
+        // Bypass costly per-op decode for validated, side-effect-free DCS
+        // polling loops; the normal interpreter handles every other opcode
+        // and all partial (1-2 instruction) tails.
+        if (try_ki_waitloop())
+            continue;
 		// debugging
 		m_ppc = m_pc;   // copy PC to previous PC
+
+        // Optional diagnostic sampling, entirely separate from the guest
+        // counters. Disabled normally; 1 sample per 1024 instructions when on.
+        if (PcProfiler* profiler = m_pc_profiler.get();
+            profiler && ((++profiler->counter & 1023u) == 0)) {
+            ++profiler->counts[m_pc & 0x3fffu];
+            ++profiler->sampled;
+        }
 
 #if ADSP_TRACK_HOTSPOTS
 		m_pcbucket[m_pc & 0x3fff]++;
@@ -423,6 +685,11 @@ int Adsp2105::run(int cycles)
 			}
 		}
 
+		// Try a privately generated native specialization only on an
+        // exact 24-bit opcode match; otherwise interpret this instruction.
+        // Off by default, so the normal release remains the known baseline.
+        if (!(m_native_opcode_enabled && !m_pc_profiler &&
+              try_native_opcode(op))) {
 		// parse the instruction
 		uint32_t temp;
 		switch (BIT(op, 16, 8))
@@ -1118,6 +1385,7 @@ int Adsp2105::run(int cycles)
 				m_core.my1.u = pgm_read_dag2(op >> 4);
 				break;
 		}
+        } // fallback interpreter
 
 		m_icount--;
 	} while (m_icount > 0);

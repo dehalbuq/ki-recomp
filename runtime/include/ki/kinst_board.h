@@ -29,18 +29,28 @@ public:
     uint64_t read(Context& c, uint32_t phys, int size) override;
     void write(Context& c, uint32_t phys, int size, uint64_t value) override;
     uint32_t interrupt_lines(Context& c) override;
+    // Test11: compare original modulo-based VBlank with the cycle-exact
+    // next-event fast path. Intended only as a reversible optimization.
+    void set_fast_vblank_irq(bool enabled) { fast_vblank_irq_ = enabled; }
     // For starts from a mid-game snapshot: cycles from cycle 0 to the next VBLANK start.
     void set_cycles_to_vblank(uint64_t cycles);
     // For starts from a mid-game snapshot: the logical CHS geometry the game set at
     // boot with INITIALIZE DEVICE PARAMETERS (KI 1: 14 heads x 40 sectors).
     void set_logical_geometry(uint32_t heads, uint32_t spt) { logical_heads_ = heads; logical_spt_ = spt; }
     uint64_t next_event(Context& c) override;
+    // Include VBlank falling edge so MIPS polling cannot jump over it.
+    uint64_t irq_edge(Context& c) override;
     void update(Context& c) override;
 
     // Called at the start of every VBLANK with the frame number (from 1).
     std::function<void(Context&, uint64_t frame)> on_vblank;
     // Displayed framebuffer as RGB888, 320 x 240 (MAME screen_update).
     std::vector<uint8_t> framebuffer_rgb(const Context& c) const;
+    // Equivalent output, but reuse caller-provided buffer for 60 Hz SDL rendering.
+    void framebuffer_rgb_into(const Context& c, std::vector<uint8_t>& out_rgb) const;
+    // R36S: native GLES2-compatible SDL ABGR8888 (memory bytes RGBA),
+    // exact same 5->8-bit channel expansion as framebuffer_rgb_into.
+    void framebuffer_rgba_into(const Context& c, std::vector<uint32_t>& out_rgba) const;
     // SRAM offset of the framebuffer being displayed (0x30000 or 0x58000).
     uint32_t displayed_bank() const { return (vram_control_ & 4) ? 0x58000 : 0x30000; }
 
@@ -85,6 +95,7 @@ private:
     std::vector<uint32_t> written_;  // sorted, unique
     std::vector<uint64_t> io_reads_ = std::vector<uint64_t>(0x200), io_writes_ = std::vector<uint64_t>(0x200);
     uint64_t frame_ = 0, next_vblank_ = kVblankStart, phase_ = 0;
+    bool fast_vblank_irq_ = false;
     bool trace_vram_ = std::getenv("KI_TRACE_VRAM") != nullptr;
     uint32_t vram_control_ = 0, sound_control_ = 0, sound_data_ = 0, sound_reset_ = 0;
 

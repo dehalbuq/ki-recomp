@@ -1,4 +1,5 @@
 #include "ki/kinst_board.h"
+#include "ki/rgb555_upload.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -18,13 +19,22 @@ KinstBoard::KinstBoard(std::vector<uint8_t> disk, std::vector<uint8_t> boot_rom)
     : disk_(std::move(disk)), rom_(std::move(boot_rom)) {
     build_identify();
     ide_reset();
+#ifdef KI_R36S_FAST_DSP
+    fast_vblank_irq_ = std::getenv("KI_R36S_VBLANK_FAST_EXPERIMENT") != nullptr;
+#endif
 }
 
 // ---- timing / interrupt lines ------------------------------------------------
 
 uint32_t KinstBoard::interrupt_lines(Context& c) {
     uint32_t lines = 0;
-    if ((c.cycles + phase_) % kCyclesPerFrame >= kVblankStart) lines |= 0x400;  // Int0: VBLANK (screen_vblank)
+    // While the scheduler is before next_vblank_, use a cheap deadline
+    // comparison instead of modulo in the hot COP0 Cause polling loop.
+    // Fall back to the original formula if the board event is overdue.
+    const bool vblank = fast_vblank_irq_ && c.cycles < next_vblank_
+        ? (next_vblank_ - c.cycles > kVblankStart)
+        : ((c.cycles + phase_) % kCyclesPerFrame >= kVblankStart);
+    if (vblank) lines |= 0x400;  // Int0: VBLANK (screen_vblank)
     if (irq_) lines |= 0x800;                                        // Int1: IDE
     return lines;
 }
@@ -37,6 +47,19 @@ void KinstBoard::set_cycles_to_vblank(uint64_t cycles) {
 
 uint64_t KinstBoard::next_event(Context&) {
     return pending_ != Pending::None && busy_until_ < next_vblank_ ? busy_until_ : next_vblank_;
+}
+
+uint64_t KinstBoard::irq_edge(Context& c) {
+    uint64_t deadline = next_event(c);
+    // The existing board scheduler only updates on the VBlank RISING
+    // edge. Cause.IP2 also falls at the end of scanline 260; a MIPS
+    // busy-wait loop must never skip past that falling edge.
+    const uint64_t phase = (c.cycles + phase_) % kCyclesPerFrame;
+    if (phase >= kVblankStart) {
+        const uint64_t falling = c.cycles + (kCyclesPerFrame - phase);
+        if (falling < deadline) deadline = falling;
+    }
+    return deadline;
 }
 
 void KinstBoard::start_busy(uint64_t cycles, Pending what) {
@@ -74,19 +97,33 @@ void KinstBoard::update(Context& c) {
     }
 }
 
+void KinstBoard::framebuffer_rgba_into(const Context& c, std::vector<uint32_t>& rgba) const {
+    constexpr size_t kPixels = 320u * 240u;
+    rgba.resize(kPixels);
+    const uint8_t* src = c.sram.data() + displayed_bank();
+    rgb555_to_abgr8888_image(src, rgba.data(), kPixels);
+}
+
+void KinstBoard::framebuffer_rgb_into(const Context& c, std::vector<uint8_t>& rgb) const {
+    // Reuse the pixel buffer on handhelds: avoid a 230 KB heap allocation per
+    // frame; preserve exact original 5->8-bit channel expansion / colors.
+    rgb.resize(320 * 240 * 3);
+    const uint32_t base = (vram_control_ & 4) ? 0x58000 : 0x30000;
+    const uint8_t* src = c.sram.data() + base;
+    uint8_t* dst = rgb.data();
+    for (size_t i = 0; i < 320u * 240u; ++i) {
+        const uint16_t v = static_cast<uint16_t>(src[2 * i] | (src[2 * i + 1] << 8));
+        const uint8_t r = static_cast<uint8_t>(v & 31);
+        const uint8_t g = static_cast<uint8_t>((v >> 5) & 31);
+        const uint8_t b = static_cast<uint8_t>((v >> 10) & 31);
+        dst[3 * i] = static_cast<uint8_t>((r << 3) | (r >> 2));
+        dst[3 * i + 1] = static_cast<uint8_t>((g << 3) | (g >> 2));
+        dst[3 * i + 2] = static_cast<uint8_t>((b << 3) | (b >> 2));
+    }
+}
 std::vector<uint8_t> KinstBoard::framebuffer_rgb(const Context& c) const {
-    std::vector<uint8_t> rgb(320 * 240 * 3);
-    uint32_t base = (vram_control_ & 4) ? 0x58000 : 0x30000;
-    for (int y = 0; y < 240; ++y)
-        for (int x = 0; x < 320; ++x) {
-            uint32_t a = base + (y * 320 + x) * 2;
-            uint16_t v = static_cast<uint16_t>(c.sram[a] | (c.sram[a + 1] << 8));
-            auto expand = [](unsigned v5) { return static_cast<uint8_t>((v5 << 3) | (v5 >> 2)); };
-            uint8_t* p = &rgb[(y * 320 + x) * 3];
-            p[0] = expand(v & 0x1f);          // BGR555: red in the low bits
-            p[1] = expand((v >> 5) & 0x1f);
-            p[2] = expand((v >> 10) & 0x1f);
-        }
+    std::vector<uint8_t> rgb;
+    framebuffer_rgb_into(c, rgb);
     return rgb;
 }
 

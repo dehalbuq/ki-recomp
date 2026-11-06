@@ -1,0 +1,129 @@
+# Install this file as .github/workflows/build-r36s.yml in a NEW PRIVATE repo.
+# Put your lawfully acquired data/kinst.zip and data/kinst.chd there with Git LFS.
+# NEVER copy these files, game-derived translated code or built executables to
+# the PUBLIC ki-recomp fork. The CI artifact must remain PRIVATE.
+name: KI R36S Test20 - PRIVATE optimized MIPS recompilation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test20:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - name: Install native ARM64 toolchain and required libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git git-lfs gcc g++ make cmake ninja-build python3-venv \
+            python3-dev pkg-config libsdl2-dev file binutils \
+            zlib1g-dev liblzma-dev libzstd-dev
+      - name: Checkout PRIVATE game inputs with Git LFS
+        uses: actions/checkout@v4
+        with:
+          path: private-inputs
+          lfs: true
+          persist-credentials: false
+      - name: Checkout PUBLIC source (no game data)
+        uses: actions/checkout@v4
+        with:
+          repository: dehalbuq/ki-recomp
+          ref: port/r36s-portmaster
+          path: ki-recomp
+          persist-credentials: false
+      - name: Verify optimized Test20 release and one CPU diagnostic launcher
+        working-directory: ki-recomp
+        run: |
+          test "$(find tools/r36s/portmaster -name '*.sh' | wc -l)" -eq 2
+          bash -n 'tools/r36s/portmaster/Killer Instinct Arcade.sh'
+          bash -n 'tools/r36s/portmaster/KI R36S - Host Profile.sh'
+          grep -q 'KI_R36S_GLES2_RGBA=1' 'tools/r36s/portmaster/Killer Instinct Arcade.sh'
+          grep -q 'KI_R36S_AUDIO_SMOOTH=1' 'tools/r36s/portmaster/Killer Instinct Arcade.sh'
+          grep -q 'KI_R36S_DISPATCH_PROFILE=1' 'tools/r36s/portmaster/KI R36S - Host Profile.sh'
+          git rev-parse --short HEAD
+      - name: Validate game files and prepare private recompiler inputs
+        working-directory: ki-recomp
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check rabbitizer==1.16.2
+          python3 tools/r36s/prepare_data.py \
+            "$GITHUB_WORKSPACE/private-inputs/data/kinst.zip" \
+            "$GITHUB_WORKSPACE/private-inputs/data/kinst.chd"
+      - name: Build Test20 ARM64 executable (O3 + dispatch cache + NEON + WSOLA)
+        working-directory: ki-recomp
+        env:
+          KI_BUILD_TYPE: Release
+          KI_R36S_MIPS_O3: "ON"
+          KI_JOBS: "2"
+        run: |
+          bash tools/r36s/build.sh
+          test -s build-r36s/ki_play
+          file build-r36s/ki_play
+          readelf -h build-r36s/ki_play | grep 'Machine:.*AArch64'
+          echo '--- Linked shared libraries (verify DarkOSre/ArkOS compatibility on device) ---'
+          readelf -d build-r36s/ki_play | grep NEEDED || true
+          readelf --version-info build-r36s/ki_play | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -Vu | tail -8 || true
+      - name: Verify Test20 cached and baseline dispatch with private AArch64 compiler
+        working-directory: ki-recomp
+        run: |
+          cmake --build build-r36s --target dispatch_cache_selftest --parallel 2
+          ctest --test-dir build-r36s --output-on-failure -R 'dispatch_cache_(baseline_)?selftest'
+      - name: Package minimal Test20 PortMaster release without ROMs or CHD
+        working-directory: ki-recomp
+        run: |
+          python3 tools/r36s/package_port.py build-r36s/ki_play \
+            --output "$GITHUB_WORKSPACE/KI-R36S-Test20-MIPS-CPU-private.zip"
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          archive = Path("../KI-R36S-Test20-MIPS-CPU-private.zip")
+          with zipfile.ZipFile(archive) as z:
+              names = set(z.namelist())
+              assert "killerinstinct/ki_play.aarch64" in names
+              launchers = {n for n in names if n.endswith(".sh")}
+              assert launchers == {"Killer Instinct Arcade.sh",
+                                   "KI R36S - Host Profile.sh"}, launchers
+              forbidden = {n for n in names if n.endswith((".chd", ".bin", ".u98")) or
+                           n.lower().endswith("/kinst.zip")}
+              assert not forbidden, f"Game data accidentally packaged: {forbidden}"
+              assert z.testzip() is None
+          print("Private Test20 ZIP verified: AArch64 ELF + 2 launchers; no ROM or CHD")
+          PY
+      - name: Build separate experimental Release/O3/LTO executable
+        working-directory: ki-recomp
+        run: |
+          cmake -S . -B build-r36s-lto -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DKI_R36S=ON \
+            -DKI_BUILD_FULL=ON -DKI_BUILD_TRACE=OFF -DKI_WITH_CHD=ON \
+            -DKI_SPLIT=32 -DKI_PYTHON="$PWD/.venv/bin/python" \
+            -DKI_R36S_MIPS_O3=ON -DKI_R36S_LTO=ON
+          cmake --build build-r36s-lto --target ki_play dispatch_cache_selftest --parallel 2
+          ctest --test-dir build-r36s-lto --output-on-failure -R 'dispatch_cache_(baseline_)?selftest'
+          file build-r36s-lto/ki_play
+          readelf -h build-r36s-lto/ki_play | grep 'Machine:.*AArch64'
+      - name: Package separate experimental LTO ROM-free PortMaster ZIP
+        working-directory: ki-recomp
+        run: |
+          python3 tools/r36s/package_port.py build-r36s-lto/ki_play \
+            --output "$GITHUB_WORKSPACE/KI-R36S-Test20-LTO-experimental-private.zip"
+          python3 - <<'PY'
+          import zipfile
+          with zipfile.ZipFile("../KI-R36S-Test20-LTO-experimental-private.zip") as z:
+              names=set(z.namelist())
+              assert "killerinstinct/ki_play.aarch64" in names
+              assert {n for n in names if n.endswith(".sh")} == {
+                  "Killer Instinct Arcade.sh", "KI R36S - Host Profile.sh"}
+              assert z.testzip() is None
+              assert not any(n.lower().endswith((".chd", ".bin", ".u98", "/kinst.zip")) for n in names)
+          print("Test20 optional LTO AArch64 package: OK; no original game data")
+          PY
+      - name: Save Test20 build as PRIVATE short-lived artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KI-R36S-Test20-MIPS-LTO-AB-private
+          path: |
+            KI-R36S-Test20-MIPS-CPU-private.zip
+            KI-R36S-Test20-LTO-experimental-private.zip
+          if-no-files-found: error
+          retention-days: 3

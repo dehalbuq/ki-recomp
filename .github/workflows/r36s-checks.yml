@@ -1,0 +1,129 @@
+name: R36S ARM64 source checks (no game data)
+on:
+  push:
+    branches: [port/r36s-portmaster]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cross-compiler-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install AArch64 C and C++ cross toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+      - name: Verify both C and C++ objects target AArch64 (no ROMs)
+        run: |
+          mkdir -p /tmp/ki-cross-check
+          cat > /tmp/ki-cross-check/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.20)
+          project(ki_cross_compiler_check LANGUAGES C CXX)
+          add_library(c_object STATIC c_object.c)
+          add_library(cpp_object STATIC cpp_object.cpp)
+          EOF
+          echo 'int ki_c_check(void) { return 4; }' > /tmp/ki-cross-check/c_object.c
+          echo 'int ki_cpp_check() { return 8; }' > /tmp/ki-cross-check/cpp_object.cpp
+          cmake -S /tmp/ki-cross-check -B /tmp/ki-cross-check/build -G Ninja \
+            -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+          cmake --build /tmp/ki-cross-check/build --parallel 2
+          readelf -h /tmp/ki-cross-check/build/CMakeFiles/c_object.dir/c_object.c.o | grep 'Machine:.*AArch64'
+          readelf -h /tmp/ki-cross-check/build/CMakeFiles/cpp_object.dir/cpp_object.cpp.o | grep 'Machine:.*AArch64'
+          bash -n tools/r36s/build.sh
+  native-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools and SDL2 headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ libsdl2-dev
+      - name: Build and run guest-independent R36S tests
+        run: |
+          cmake -S . -B build-ci -G Ninja -DCMAKE_BUILD_TYPE=Debug -DKI_BUILD_FULL=OFF -DKI_R36S=ON
+          cmake --build build-ci --target runtime_selftest dcs_fastmem_selftest dsp_hotspot_selftest dsp_waitloop_selftest adsp_native_selftest kinst_vblank_fast_selftest mfc0_inline_selftest mips_idle_skip_selftest mips_memory_fast_selftest gles2_rgba_upload_selftest host_profiler_selftest gfx_profile_selftest audio_smooth_selftest boot_wipe_selftest dispatch_cache_selftest --parallel 2
+          ctest --test-dir build-ci --output-on-failure
+      - name: Verify GNU ld circular archive link fix without game data
+        run: |
+          cmake -S tests/r36s_link_smoke -B build-link-smoke -G Ninja
+          cmake --build build-link-smoke --parallel 2
+          ctest --test-dir build-link-smoke --output-on-failure
+      - name: Compile R36S SDL player translation units (syntax-only)
+        run: |
+          c++ -std=c++20 -fsyntax-only -DKI_R36S=1 -Iruntime/include -Ithird_party/adsp2100 -Isrc $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
+      - name: Syntax-check optimized clean Release without runtime probes
+        run: |
+          c++ -std=c++20 -O3 -DNDEBUG -fsyntax-only             -DKI_R36S=1 -DKI_R36S_RELEASE_CLEAN=1             -Iruntime/include -Ithird_party/adsp2100 -Isrc             $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
+          c++ -std=c++20 -O3 -DNDEBUG -fsyntax-only             -DKI_R36S_FAST_DISPATCH=1 -DKI_R36S_RELEASE_CLEAN=1             -Iruntime/include -Ithird_party/adsp2100 runtime/src/runtime.cpp
+      - name: Validate startup credits and legal page on headless ARM64 SDL2
+        run: |
+          c++ -std=c++20 -O2 -Wall -Wextra -Isrc \
+            $(sdl2-config --cflags) tests/r36s_intro_selftest.cpp \
+            $(sdl2-config --libs) -o /tmp/ki-r36s-intro-selftest
+          SDL_VIDEODRIVER=dummy /tmp/ki-r36s-intro-selftest
+      - name: Check launchers, build scripts and metadata
+        run: |
+          bash -n tools/r36s/build.sh tools/r36s/diagnose.sh
+          find tools/r36s/portmaster -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py tools/kirecomp/idle_patterns.py
+          python3 tools/kirecomp/idle_patterns.py
+          python3 tools/r36s/prepare_data.py --help >/dev/null
+          python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("tools/r36s/portmaster")
+          d = json.loads((p / "port.json").read_text())
+          assert d["version"] == 4 and d["attr"]["arch"] == ["aarch64"]
+          assert d["items"] == ["Killer Instinct Arcade.sh", "killerinstinct"]
+          scripts = sorted(f.name for f in p.glob("*.sh"))
+          assert scripts == ["KI R36S - Host Profile.sh",
+                             "Killer Instinct Arcade.sh"], scripts
+          assert (p / "gameinfo.xml").exists()
+          game = (p / "Killer Instinct Arcade.sh").read_text()
+          diag = (p / "KI R36S - Host Profile.sh").read_text()
+          for required in ("KI_R36S_GLES2_RGBA=1",
+                           "KI_R36S_AUDIO_SMOOTH=1",
+                           "KI_R36S_BOOT_BLUE_FAST="):
+              assert required in game
+          for required in ("KI_R36S_DISPATCH_PROFILE=1",
+                           "KI_R36S_TIME_DSP=1",
+                           "KI_R36S_GPU_PROFILE=1",
+                           "KI_R36S_HOST_PROFILE=1"):
+              assert required in diag
+          print("Test20: exactly two PortMaster entries and optimized defaults OK")
+          PY
+      - name: Test Test20 ZIP packaging with synthetic AArch64 ELF (not a game)
+        run: |
+          echo 'int main(void) { return 0; }' | c++ -x c++ - -o /tmp/ki-romfree-elf
+          python3 tools/r36s/package_port.py /tmp/ki-romfree-elf --output /tmp/ki-test20-smoke.zip
+          python3 - <<'PY'
+          import zipfile
+          with zipfile.ZipFile("/tmp/ki-test20-smoke.zip") as z:
+              names = set(z.namelist())
+              for entry in ("killerinstinct/ki_play.aarch64",
+                            "Killer Instinct Arcade.sh",
+                            "KI R36S - Host Profile.sh"):
+                  assert entry in names, f"Missing from package: {entry}"
+              assert not any(n.endswith((".chd", ".bin", ".u98")) or
+                             n.lower().endswith("/kinst.zip") for n in names)
+              assert z.testzip() is None
+          print("ROM-free Test20 two-launcher package smoke test OK")
+          PY
+      - name: Validate v0.1.0 clean release packaging and no diagnostic launcher
+        run: |
+          python3 tools/r36s/package_port.py /tmp/ki-romfree-elf             --release --output /tmp/ki-release-smoke.zip
+          python3 - <<'PY'
+          from zipfile import ZipFile
+          with ZipFile("/tmp/ki-release-smoke.zip") as z:
+              scripts={p for p in z.namelist() if p.endswith(".sh")}
+              assert scripts=={"Killer Instinct Arcade.sh"},scripts
+              assert b"v0.1.0" in z.read("README.md")
+              assert "killerinstinct/ki_play.aarch64" in z.namelist()
+              assert z.testzip() is None
+          print("ROM-free clean release package smoke: OK")
+          PY

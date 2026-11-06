@@ -34,6 +34,7 @@ import sys
 from dataclasses import dataclass, field
 
 import rabbitizer
+from idle_patterns import match_irq_idle
 
 rabbitizer.config.pseudos_enablePseudos = False
 rabbitizer.config.regNames_gprAbiNames = rabbitizer.Abi.O32
@@ -292,6 +293,7 @@ class Translator:
         self.timing = timing
         self.known: set[int] = set()
         self.missing: set[int] = set()  # direct transfers to addresses that are not entries yet
+        self.idle_sites: set[int] = set()  # verified safe 5-word IRQ loops
 
     # -- straight-line instructions ---------------------------------------
     def assign(self, reg: int, expr: str) -> str:
@@ -365,28 +367,28 @@ class Translator:
         if n == "mthi": return f"c.hi = {rs};"
         if n == "mtlo": return f"c.lo = {rs};"
         # loads (performed even when rt == $zero: I/O reads can have side effects)
-        loads = {"lb": "ki::sx8(ki::load<uint8_t>(c, {a}, {pc}))",
-                 "lbu": "uint64_t(ki::load<uint8_t>(c, {a}, {pc}))",
-                 "lh": "ki::sx16(ki::load<uint16_t>(c, {a}, {pc}))",
-                 "lhu": "uint64_t(ki::load<uint16_t>(c, {a}, {pc}))",
-                 "lw": "ki::sx32(ki::load<uint32_t>(c, {a}, {pc}))",
-                 "ll": "ki::sx32(ki::load<uint32_t>(c, {a}, {pc}))",
-                 "lwu": "uint64_t(ki::load<uint32_t>(c, {a}, {pc}))",
-                 "ld": "ki::load<uint64_t>(c, {a}, {pc})",
-                 "lld": "ki::load<uint64_t>(c, {a}, {pc})",
-                 "lwl": "ki::lwl(c, {rt}, {a}, {pc})", "lwr": "ki::lwr(c, {rt}, {a}, {pc})",
-                 "ldl": "ki::ldl(c, {rt}, {a}, {pc})", "ldr": "ki::ldr(c, {rt}, {a}, {pc})"}
+        loads = {"lb": "ki::sx8(ki::load_recompiled<uint8_t>(c, {a}, {pc}))",
+                 "lbu": "uint64_t(ki::load_recompiled<uint8_t>(c, {a}, {pc}))",
+                 "lh": "ki::sx16(ki::load_recompiled<uint16_t>(c, {a}, {pc}))",
+                 "lhu": "uint64_t(ki::load_recompiled<uint16_t>(c, {a}, {pc}))",
+                 "lw": "ki::sx32(ki::load_recompiled<uint32_t>(c, {a}, {pc}))",
+                 "ll": "ki::sx32(ki::load_recompiled<uint32_t>(c, {a}, {pc}))",
+                 "lwu": "uint64_t(ki::load_recompiled<uint32_t>(c, {a}, {pc}))",
+                 "ld": "ki::load_recompiled<uint64_t>(c, {a}, {pc})",
+                 "lld": "ki::load_recompiled<uint64_t>(c, {a}, {pc})",
+                 "lwl": "ki::lwl_recompiled(c, {rt}, {a}, {pc})", "lwr": "ki::lwr_recompiled(c, {rt}, {a}, {pc})",
+                 "ldl": "ki::ldl_recompiled(c, {rt}, {a}, {pc})", "ldr": "ki::ldr_recompiled(c, {rt}, {a}, {pc})"}
         if n in loads:
             return a(i.rt, loads[n].format(a=addr, pc=pc, rt=rt))
         stores = {"sb": "uint8_t", "sh": "uint16_t", "sw": "uint32_t", "sd": "uint64_t"}
         if n in stores:
             t = stores[n]
-            return f"ki::store<{t}>(c, {addr}, static_cast<{t}>({rt}), {pc});"
+            return f"ki::store_recompiled<{t}>(c, {addr}, static_cast<{t}>({rt}), {pc});"
         if n in ("swl", "swr", "sdl", "sdr"):
             return f"ki::{n}(c, {rt}, {addr}, {pc});"
         if n in ("sc", "scd"):  # single CPU, no LL/SC contention modelled
             t = "uint32_t" if n == "sc" else "uint64_t"
-            return f"ki::store<{t}>(c, {addr}, static_cast<{t}>({rt}), {pc}); " + a(i.rt, "1ull")
+            return f"ki::store_recompiled<{t}>(c, {addr}, static_cast<{t}>({rt}), {pc}); " + a(i.rt, "1ull")
         # traps
         traps = {"teq": "{rs} == {rt}", "tne": "{rs} != {rt}", "tge": "ki::s64({rs}) >= ki::s64({rt})",
                  "tgeu": "{rs} >= {rt}", "tlt": "ki::s64({rs}) < ki::s64({rt})", "tltu": "{rs} < {rt}",
@@ -401,7 +403,7 @@ class Translator:
         if n == "cache": return f"ki::cache_op(c, {i.rt}, {addr}, {pc});"
         if n in ("mfc0", "dmfc0"):
             conv = "ki::sx32(ki::lo32({}))" if n == "mfc0" else "{}"
-            return a(i.rt, conv.format(f"ki::mfc0(c, {i.rd}, {pc})"))
+            return a(i.rt, conv.format(f"ki::mfc0_recompiled(c, {i.rd}, {pc})"))
         if n in ("mtc0", "dmtc0"):
             return f"ki::mtc0(c, {i.rd}, {rt}, {pc});"
         if n == "eret":
@@ -419,10 +421,10 @@ class Translator:
         """COP1, single precision and moves (Status.FR = 1). None if not FPU."""
         n, ft, fs, fd, rt = i.name, i.ft, i.fs, i.fd, R(i.rt)
         S = lambda r: f"ki::fs(c, {r})"  # noqa: E731
-        if n == "lwc1": return f"ki::set_fbits(c, {ft}, ki::load<uint32_t>(c, {addr}, {pc}));"
-        if n == "swc1": return f"ki::store<uint32_t>(c, {addr}, ki::fbits(c, {ft}), {pc});"
-        if n == "ldc1": return f"c.f[{ft}] = ki::load<uint64_t>(c, {addr}, {pc});"
-        if n == "sdc1": return f"ki::store<uint64_t>(c, {addr}, c.f[{ft}], {pc});"
+        if n == "lwc1": return f"ki::set_fbits(c, {ft}, ki::load_recompiled<uint32_t>(c, {addr}, {pc}));"
+        if n == "swc1": return f"ki::store_recompiled<uint32_t>(c, {addr}, ki::fbits(c, {ft}), {pc});"
+        if n == "ldc1": return f"c.f[{ft}] = ki::load_recompiled<uint64_t>(c, {addr}, {pc});"
+        if n == "sdc1": return f"ki::store_recompiled<uint64_t>(c, {addr}, c.f[{ft}], {pc});"
         if n == "mtc1": return f"ki::set_fbits(c, {fs}, ki::lo32({rt}));"
         if n == "mfc1": return self.assign(i.rt, f"ki::sx32(ki::fbits(c, {fs}))")
         if n == "dmtc1": return f"c.f[{fs}] = {rt};"
@@ -570,6 +572,22 @@ class Translator:
             poll = f"ki::poll(c, {u32(pc)}); " if self.timing and t <= pc else ""
             return f"{{ {poll}goto L_{t:08x}; }}" if poll else f"goto L_{t:08x};"
 
+        def safe_irq_loop(br: Insn, delay: Insn):
+            # Only emit a skip for the *exact* ROM-backed five-instruction
+            # pattern. A taken branch must jump back 12 bytes to mfc0 Cause.
+            if not self.timing or br.name not in ("beq", "bne"):
+                return None
+            head = br.vaddr - 12
+            if br.branch_target != head or head not in addrs:
+                return None
+            words = [self.img.read_word(head + 4 * k) for k in range(5)]
+            if any(w is None for w in words) or words[4] != delay.word:
+                return None
+            match = match_irq_idle(words)
+            if match:
+                self.idle_sites.add(head)
+            return match
+
         def fall_through(next_addr: int, next_idx: int, pc: int):
             # Control reaches next_addr sequentially; if that is not the next
             # emitted instruction, continue in the function that starts there
@@ -639,6 +657,15 @@ class Translator:
                 link = i.name in LINK_BRANCHES
                 if t in addrs:
                     go = go_to(t, i.vaddr)
+                    candidate = safe_irq_loop(i, d)
+                    if candidate is not None:
+                        # Branch condition was taken and its delay slot has
+                        # already executed. The original generated loop will
+                        # still execute the final iteration at the IRQ edge.
+                        go = (f"{{ ki::poll_irq_idle(c, {u32(i.vaddr)}, "
+                              f"{candidate.mask}u, {candidate.reg}u, "
+                              f"{candidate.counter_reg}u, {candidate.counter_imm}, "
+                              f"{candidate.cycles}u); goto L_{t:08x}; }}")
                 elif link:
                     go = f"{{ {self.call(t, i.vaddr)} }}"  # conditional call; execution continues after it
                 else:
@@ -1030,6 +1057,12 @@ def main(argv: list[str]) -> int:
                 for i in fn.insns:
                     f.write(f"  {i.vaddr:08x}: {i.word:08x}  {i.text}\n")
     if args.discover or args.discover_pointers:
+        if tr.timing:
+            sites = sorted(tr.idle_sites)
+            print("KI MIPS exact IRQ polling loops recognized: "
+                  + str(len(sites))
+                  + (" [" + ",".join(f"0x{x:08x}" for x in sites[:12]) + "]" if sites else ""),
+                  file=sys.stderr)
         n = sum(len(f.insns) for f in funcs)
         print(f"translated {len(funcs)} functions ({n} instructions), {len(failures)} failed", file=sys.stderr)
         reasons: dict[str, int] = {}
