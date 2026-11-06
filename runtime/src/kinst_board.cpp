@@ -96,6 +96,17 @@ void KinstBoard::update(Context& c) {
     }
 }
 
+// Source of KI RGB555 expansion shared with the optional native RGBA
+// upload path. The original RGB24 renderer remains untouched as baseline.
+#include "ki/rgb555_upload.h"
+
+void KinstBoard::framebuffer_rgba_into(const Context& c, std::vector<uint32_t>& rgba) const {
+    constexpr size_t kPixels = 320u * 240u;
+    rgba.resize(kPixels);
+    const uint8_t* src = c.sram.data() + displayed_bank();
+    rgb555_to_abgr8888_image(src, rgba.data(), kPixels);
+}
+
 void KinstBoard::framebuffer_rgb_into(const Context& c, std::vector<uint8_t>& rgb) const {
     // Reuse the pixel buffer on handhelds: avoid a 230 KB heap allocation per
     // frame; preserve exact original 5->8-bit channel expansion / colors.
