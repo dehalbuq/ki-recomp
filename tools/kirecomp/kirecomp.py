@@ -34,6 +34,7 @@ import sys
 from dataclasses import dataclass, field
 
 import rabbitizer
+from idle_patterns import match_irq_idle
 
 rabbitizer.config.pseudos_enablePseudos = False
 rabbitizer.config.regNames_gprAbiNames = rabbitizer.Abi.O32
@@ -292,6 +293,7 @@ class Translator:
         self.timing = timing
         self.known: set[int] = set()
         self.missing: set[int] = set()  # direct transfers to addresses that are not entries yet
+        self.idle_sites: set[int] = set()  # verified safe 5-word IRQ loops
 
     # -- straight-line instructions ---------------------------------------
     def assign(self, reg: int, expr: str) -> str:
@@ -570,6 +572,22 @@ class Translator:
             poll = f"ki::poll(c, {u32(pc)}); " if self.timing and t <= pc else ""
             return f"{{ {poll}goto L_{t:08x}; }}" if poll else f"goto L_{t:08x};"
 
+        def safe_irq_loop(br: Insn, delay: Insn):
+            # Only emit a skip for the *exact* ROM-backed five-instruction
+            # pattern. A taken branch must jump back 12 bytes to mfc0 Cause.
+            if not self.timing or br.name not in ("beq", "bne"):
+                return None
+            head = br.vaddr - 12
+            if br.branch_target != head or head not in addrs:
+                return None
+            words = [self.img.read_word(head + 4 * k) for k in range(5)]
+            if any(w is None for w in words) or words[4] != delay.word:
+                return None
+            match = match_irq_idle(words)
+            if match:
+                self.idle_sites.add(head)
+            return match
+
         def fall_through(next_addr: int, next_idx: int, pc: int):
             # Control reaches next_addr sequentially; if that is not the next
             # emitted instruction, continue in the function that starts there
@@ -639,6 +657,15 @@ class Translator:
                 link = i.name in LINK_BRANCHES
                 if t in addrs:
                     go = go_to(t, i.vaddr)
+                    candidate = safe_irq_loop(i, d)
+                    if candidate is not None:
+                        # Branch condition was taken and its delay slot has
+                        # already executed. The original generated loop will
+                        # still execute the final iteration at the IRQ edge.
+                        go = (f"{{ ki::poll_irq_idle(c, {u32(i.vaddr)}, "
+                              f"{candidate.mask}u, {candidate.reg}u, "
+                              f"{candidate.counter_reg}u, {candidate.counter_imm}, "
+                              f"{candidate.cycles}u); goto L_{t:08x}; }}")
                 elif link:
                     go = f"{{ {self.call(t, i.vaddr)} }}"  # conditional call; execution continues after it
                 else:
@@ -1030,6 +1057,12 @@ def main(argv: list[str]) -> int:
                 for i in fn.insns:
                     f.write(f"  {i.vaddr:08x}: {i.word:08x}  {i.text}\n")
     if args.discover or args.discover_pointers:
+        if tr.timing:
+            sites = sorted(tr.idle_sites)
+            print("KI MIPS exact IRQ polling loops recognized: "
+                  + str(len(sites))
+                  + (" [" + ",".join(f"0x{x:08x}" for x in sites[:12]) + "]" if sites else ""),
+                  file=sys.stderr)
         n = sum(len(f.insns) for f in funcs)
         print(f"translated {len(funcs)} functions ({n} instructions), {len(failures)} failed", file=sys.stderr)
         reasons: dict[str, int] = {}
