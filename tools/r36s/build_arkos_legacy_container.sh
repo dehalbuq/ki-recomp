@@ -51,6 +51,8 @@ curl -fL --retry 3 \
   -o build-arkos-deps/SDL2.tar.gz
 tar -xzf build-arkos-deps/SDL2.tar.gz -C build-arkos-deps/
 test -f "build-arkos-deps/SDL2-${SDL_VERSION}/CMakeLists.txt"
+"$PYTHON" tools/r36s/patch_sdl2_kmsdrm_legacy.py \
+  "build-arkos-deps/SDL2-${SDL_VERSION}/src/video/kmsdrm/SDL_kmsdrmvideo.c"
 export PKG_CONFIG_PATH="/opt/ki-sdl2/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 # KMSDRM must be available, or this package will be unusable for
 # handheld direct-screen rendering. Build with dynamic GBM/DRM loading.
@@ -75,6 +77,7 @@ export KI_PYTHON="$PYTHON"
 export KI_BUILD_TYPE=Release
 export KI_R36S_MIPS_O3=ON
 export KI_R36S_RELEASE_CLEAN=ON
+export KI_R36S_LEGACY_SDL_ABI=ON
 export KI_R36S_BUILD_DIR=build-r36s-legacy
 export KI_R36S_SKIP_BUILD_RPATH=1
 export KI_JOBS=2
