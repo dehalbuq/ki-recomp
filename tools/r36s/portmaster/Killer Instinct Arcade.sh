@@ -12,6 +12,9 @@ GAMEDIR="$PORTS/killerinstinct"
 # Audio smoothing was preferred on real RK3326 hardware. No skipped frames.
 export KI_R36S_GLES2_RGBA=1
 export KI_R36S_AUDIO_SMOOTH=1
+# Test21: accelerate only the detected initial blue descending curtain.
+# Set KI_R36S_BOOT_BLUE_FAST=0 for a complete exact-speed startup A/B.
+export KI_R36S_BOOT_BLUE_FAST="${KI_R36S_BOOT_BLUE_FAST:-1}"
 # Obsolete Test19 candidates must never leak into the optimized default.
 unset KI_R36S_DIRECT_TEXTURE KI_R36S_RGBA_SCALAR KI_R36S_NO_CLEAR
 BIN="$GAMEDIR/${KI_R36S_BINARY:-ki_play.aarch64}"
