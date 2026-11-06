@@ -35,7 +35,7 @@ if args.legacy_binary:
     if not args.legacy_binary.is_file():
         sys.exit("Legacy AArch64 executable is missing")
     legacy_head = args.legacy_binary.read_bytes()[:20]
-    if len(legacy_head) < 20 or legacy_head[:4] != b"\\x7fELF":
+    if len(legacy_head) < 20 or legacy_head[:4] != b"\x7fELF":
         sys.exit("Invalid legacy ELF")
     # The two releases must be real native ARM64, not a cross-arch stub.
     if legacy_head[5] != 1 or int.from_bytes(legacy_head[18:20], "little") != 183:
