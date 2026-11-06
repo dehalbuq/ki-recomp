@@ -1,3 +1,137 @@
+# Killer Instinct (Arcade) — R36S ARM64
+
+**Native AArch64 port of the 1994 arcade Killer Instinct for the R36S / RK3326, based on the static MIPS recompilation by [kilnan](https://github.com/kilnan/ki-recomp), adapted by [dehalbuq](https://github.com/dehalbuq).**
+
+[**Active R36S source branch**](https://github.com/dehalbuq/ki-recomp/tree/port/r36s-portmaster) ·
+[Development progress](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/docs/R36S_PROGRESS.md) ·
+[Port/build guide](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/docs/R36S_PORT.md) ·
+[Contribute](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/CONTRIBUTING.md) ·
+[Legal notice and credits](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/docs/R36S_LEGAL.md)
+
+> **Versão em português:** Port nativo ARM64 para o R36S, sem MAME/DOSBox para executar a CPU do jogo. Requer os arquivos originais `kinst.zip` e `kinst.chd`, que **não acompanham o projeto**. A versão limpa v0.1.0 está em preparação/teste; consulte as informações legais antes de distribuir qualquer executável recompilado. Contribuições e testes no console são bem-vindos.
+
+## Current R36S status — v0.1.0 clean release candidate
+
+| Item | State |
+|---|---|
+| Real hardware | **Tested:** RK3326 Cortex-A35 handheld running **dArkOSRE** at 640×480, 4:3 |
+| Other firmware variants | **Unverified** for this KI build; libc/SDL/Mali ABI requirements differ |
+| Video | OpenGL ES 2 hardware-accelerated output; 320×240 guest RGB555 to RGBA8888 with ARM NEON, pixel-perfect 2× |
+| Game runtime | Static recompiled MIPS R4600 C++/AArch64, original game clock (~58.98 Hz), no MAME/DOSBox |
+| Sound | Emulated ADSP-2105 DSP plus experimental pitch-preserving WSOLA playback |
+| Controls | D-pad/stick, six attack buttons, coin/start; **hold Start+Select** for the exit menu |
+| Boot | Experimental blue curtain speedup, constrained to original game startup |
+| v0.1.0 | Stripped Release/O3 build, no per-frame profiling or extra diagnostic launchers |
+| Startup screen | Two one-time pages for creator/third-party credits and legal notice; no game-time overhead |
+| Actual on-device FPS | Test21 sampled windows **48.3–58.3 FPS**, averaging roughly **53.8 FPS** after boot. Clean build/splash needs final hardware validation |
+
+The CPU guest program is native **static recompilation**, not generic
+emulation. However, the **audio DSP is still emulated** and most arcade
+sprite/panorama composition is performed in CPU-visible framebuffer
+memory. OpenGL ES 2 accelerates final image output; it does not convert
+the original game into a real-time 3D GPU renderer.
+
+<details>
+<summary>Performance and port milestones</summary>
+
+- Early builds: arcade started and fights became playable on actual RK3326 hardware.
+- Test14/15: validated MIPS idle acceleration, fast guest memory and AArch64 -O3.
+- Tests16–17: optimized GLES2 RGBA upload, ~1.4 ms in measured upload stages versus ~5 ms on RGB24.
+- Test18: WSOLA smoothing substantially reduced audio-buffer starvation; subjective gameplay became more fluid.
+- Test19: tested direct texture locking and NEON vs scalar color; the established SDL texture update remained the most practical GPU upload path.
+- Test20: indirect MIPS call cache, guarded regressions, optional separate LTO investigation and clean launcher menu.
+- Test21: temporary accelerated blue startup curtain; real logs verify normal pacing resumes afterward.
+- v0.1.0: a separate minimal, symbol-stripped Release/O3 candidate without FPS/CPU/DSP/graphics profiling; startup attribution/legal screens now being tested.
+
+[Full measurements, sources and remaining work](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/docs/R36S_PROGRESS.md).
+
+</details>
+
+## Installing on a compatible R36S (personal testing)
+
+1. Back up your `roms/ports/killerinstinct/` directory and saved settings.
+2. Obtain a compatible locally compiled R36S PortMaster package from your **own lawful original game data**. Public source and ROM-free CI checks are available in this repository; the mere availability of a privately built binary is **not** permission to redistribute it.
+3. Extract the package into `/roms/ports/`.
+4. Copy **your own** `kinst.zip` (KI1 L1.5D BIOS/sound files) and `kinst.chd` into `/roms/ports/killerinstinct/gamedata/`.
+5. Launch **Killer Instinct Arcade** in the Ports menu. The credits screen and legal notice precede the game; A/Start advances them.
+
+```text
+roms/ports/
+├── Killer Instinct Arcade.sh
+├── port.json
+├── gameinfo.xml
+├── README.md
+└── killerinstinct/
+    ├── ki_play.aarch64
+    ├── gamedata/
+    │   ├── kinst.zip        # supply privately and lawfully
+    │   └── kinst.chd        # supply privately and lawfully
+    └── conf/                # settings and disk-write saves
+```
+
+R36S action mapping: **D-pad/analog** move, **X/Y/R1** high
+attacks, **A/B/R2** low attacks, **Start** start, **Select/L1**
+coin. **Start+Select** (hold ~0.8 seconds) opens a resume/exit menu.
+Firmware controller mappings may vary.
+
+Do not replace firmware `libc.so.6`, GPU/EGL or system SDL drivers
+to force an incompatible binary to start.
+
+## Legal status and acknowledgments
+
+**This is an independent unofficial project, not endorsed by the
+rights holders or the official PortMaster catalog.** Rare/Midway
+and their successors own the commercial game's protected materials.
+The port **does not contain the original `kinst.zip` or `kinst.chd`**;
+users must provide their own legitimate copies.
+
+**Important distinction:** a statically recompiled AArch64 binary may
+itself incorporate **copyrighted original-game-derived code**.
+Absence of external ROM/CHD files does *not* establish legal permission
+to distribute the executable. Public distribution may require
+authorization. Source-only contributions, documentation and
+synthetic tests are the safe default pending rights review.
+
+**Credits:** original Killer Instinct arcade by Rare/Midway;
+recompilation foundation and board model by
+[`kilnan/ki-recomp`](https://github.com/kilnan/ki-recomp);
+R36S ARM64 adaptation by
+[`dehalbuq`](https://github.com/dehalbuq);
+ADSP-2105 interpreter derived from MAME's Aaron Giles work;
+SDL2, libchdr, miniz, rabbitizer and the PortMaster community.
+Keep all original author and third-party license notices.
+See [full attribution and distribution guidance](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/docs/R36S_LEGAL.md).
+
+## How to contribute
+
+Development, bug reports and device benchmarks are welcome!
+**Open pull requests against `port/r36s-portmaster`, not `main`**
+for this handheld. Great first tasks include controller/firmware
+validation, reproducible bug fixes, audio/CPU/GLES2 performance
+investigation, documentation and *ROM-free* regression tests.
+
+Report your R36S model, firmware, source SHA, fighter/stage,
+steps to reproduce, expected/observed behavior, and a redacted log
+(if available). For performance comparisons use the **same fight**
+and distinguish release FPS from diagnostic-binary FPS.
+
+**Never upload ROMs, CHDs, extracted guest code, generated C++ from
+commercial binaries, copyrighted artwork/sound, private CI build
+artifacts or secret credentials to an issue or pull request.**
+
+[Read the complete contributor guide](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/CONTRIBUTING.md) ·
+[Open an issue](https://github.com/dehalbuq/ki-recomp/issues)
+
+---
+
+## Original ki-recomp project documentation
+
+The following information documents the original portable
+recompiler (macOS/Linux, MAME-verified), and is retained so that the
+upstream research and development workflow is not lost. The R36S-specific
+instructions and compatibility statements above take precedence for
+this handheld.
+
 # ki-recomp
 
 Exploratory static recompilation of **Killer Instinct** (Rare/Midway arcade,
