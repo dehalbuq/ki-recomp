@@ -3,6 +3,7 @@
 **Native AArch64 port of the 1994 arcade Killer Instinct for the R36S / RK3326, based on the static MIPS recompilation by [kilnan](https://github.com/kilnan/ki-recomp), adapted by [dehalbuq](https://github.com/dehalbuq).**
 
 [**Active R36S source branch**](https://github.com/dehalbuq/ki-recomp/tree/port/r36s-portmaster) ·
+[Guia em português](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/docs/R36S_README_PTBR.md) ·
 [Development progress](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/docs/R36S_PROGRESS.md) ·
 [Port/build guide](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/docs/R36S_PORT.md) ·
 [Contribute](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/CONTRIBUTING.md) ·
