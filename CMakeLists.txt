@@ -71,6 +71,9 @@ if(KI_R36S)
   # Only handheld builds enable KI-specific DSP polling acceleration by
   # default. Other platforms keep the interpreter until validated.
   target_compile_definitions(ki_runtime PRIVATE KI_R36S_FAST_DSP=1 KI_R36S_FAST_DISPATCH=1)
+  if(KI_R36S_RELEASE_CLEAN)
+    target_compile_definitions(ki_runtime PRIVATE KI_R36S_RELEASE_CLEAN=1)
+  endif()
 endif()
 
 # A recompiled-code library defines the function table (ki::kFunctionTable) that
