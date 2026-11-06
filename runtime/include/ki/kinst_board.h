@@ -48,6 +48,9 @@ public:
     std::vector<uint8_t> framebuffer_rgb(const Context& c) const;
     // Equivalent output, but reuse caller-provided buffer for 60 Hz SDL rendering.
     void framebuffer_rgb_into(const Context& c, std::vector<uint8_t>& out_rgb) const;
+    // R36S: native GLES2-compatible SDL ABGR8888 (memory bytes RGBA),
+    // exact same 5->8-bit channel expansion as framebuffer_rgb_into.
+    void framebuffer_rgba_into(const Context& c, std::vector<uint32_t>& out_rgba) const;
     // SRAM offset of the framebuffer being displayed (0x30000 or 0x58000).
     uint32_t displayed_bank() const { return (vram_control_ & 4) ? 0x58000 : 0x30000; }
 
