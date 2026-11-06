@@ -92,6 +92,9 @@ struct Context {
     // for side-by-side hardware comparison and every other platform.
     bool fast_cop0 = false;
     bool fast_mips_idle = false;
+    // Guest memory fast path uses proved physical KSEG/zero-page RAM ranges.
+    // Kept switchable for on-device A/B performance and regression checks.
+    bool fast_mips_memory = false;
     uint64_t mips_idle_skipped_cycles = 0;
     uint64_t mips_idle_skipped_iterations = 0;
 };
@@ -251,6 +254,79 @@ inline void store(Context& c, uint32_t vaddr, T value, uint32_t pc) {
         io_write(c, vaddr, sizeof(T), value);
 }
 
+// R36S native recompiler memory fast-path. The existing load/store() above
+// are the reference semantics for all platforms. This specializes the common
+// SRAM, DRAM and zero-page RAM accesses into a constant-size memcpy with no
+// dynamic segment translation, virtual I/O call or guest exception path.
+// Unaligned or invalid accesses ALWAYS call the reference implementation.
+// KI_MEM_PROBE diagnostics remain fully observable by bypassing this path.
+template <typename T>
+inline T load_recompiled(Context& c, uint32_t vaddr, uint32_t pc) {
+#ifdef KI_R36S_FAST_MEMORY
+    if (c.fast_mips_memory) {
+#ifdef KI_MEM_PROBE
+        if (!g_mem_probe)
+#endif
+        {
+            if ((vaddr & (sizeof(T) - 1)) == 0) {
+                const uint32_t segment = vaddr & 0xe0000000u;
+                if (segment == 0x80000000u || segment == 0xa0000000u) {
+                    const uint32_t phys = vaddr & 0x1fffffffu;
+                    if (phys <= kSramSize - sizeof(T)) {
+                        T v;
+                        std::memcpy(&v, c.sram.data() + phys, sizeof(T));
+                        return v;
+                    }
+                    const uint32_t dram_offset = phys - kDramBase;
+                    if (dram_offset <= kDramSize - sizeof(T)) {
+                        T v;
+                        std::memcpy(&v, c.dram.data() + dram_offset, sizeof(T));
+                        return v;
+                    }
+                } else if (vaddr <= kZeroPageSize - sizeof(T)) {
+                    T v;
+                    std::memcpy(&v, c.dram.data() + kZeroPagePhys - kDramBase + vaddr, sizeof(T));
+                    return v;
+                }
+            }
+        }
+    }
+#endif
+    return load<T>(c, vaddr, pc);
+}
+
+template <typename T>
+inline void store_recompiled(Context& c, uint32_t vaddr, T value, uint32_t pc) {
+#ifdef KI_R36S_FAST_MEMORY
+    if (c.fast_mips_memory) {
+#ifdef KI_MEM_PROBE
+        if (!g_mem_probe)
+#endif
+        {
+            if ((vaddr & (sizeof(T) - 1)) == 0) {
+                const uint32_t segment = vaddr & 0xe0000000u;
+                if (segment == 0x80000000u || segment == 0xa0000000u) {
+                    const uint32_t phys = vaddr & 0x1fffffffu;
+                    if (phys <= kSramSize - sizeof(T)) {
+                        std::memcpy(c.sram.data() + phys, &value, sizeof(T));
+                        return;
+                    }
+                    const uint32_t dram_offset = phys - kDramBase;
+                    if (dram_offset <= kDramSize - sizeof(T)) {
+                        std::memcpy(c.dram.data() + dram_offset, &value, sizeof(T));
+                        return;
+                    }
+                } else if (vaddr <= kZeroPageSize - sizeof(T)) {
+                    std::memcpy(c.dram.data() + kZeroPagePhys - kDramBase + vaddr, &value, sizeof(T));
+                    return;
+                }
+            }
+        }
+    }
+#endif
+    store<T>(c, vaddr, value, pc);
+}
+
 // Unaligned word/doubleword halves, little-endian semantics (MIPS III manual,
 // LWL/LWR/LDL/LDR/SWL/SWR/SDL/SDR with BigEndianCPU = 0).
 uint64_t lwl(Context& c, uint64_t rt, uint32_t vaddr, uint32_t pc);
@@ -261,6 +337,58 @@ void swl(Context& c, uint64_t rt, uint32_t vaddr, uint32_t pc);
 void swr(Context& c, uint64_t rt, uint32_t vaddr, uint32_t pc);
 void sdl(Context& c, uint64_t rt, uint32_t vaddr, uint32_t pc);
 void sdr(Context& c, uint64_t rt, uint32_t vaddr, uint32_t pc);
+
+// The regular MIPS unaligned helpers are out-of-line and therefore expensive
+// on Cortex-A35. Inline their exact little-endian half-access semantics in
+// generated code while retaining original functions as the baseline.
+inline uint64_t lwl_recompiled(Context& c, uint64_t rt, uint32_t a, uint32_t pc) {
+#ifdef KI_R36S_FAST_MEMORY
+    if (c.fast_mips_memory) {
+        const unsigned sh = 8u * (3u - (a & 3u));
+        const uint32_t word = load_recompiled<uint32_t>(c, a & ~3u, pc);
+        const uint32_t mask = 0xffffffffu << sh;
+        return sx32((lo32(rt) & ~mask) | (word << sh));
+    }
+#endif
+    return lwl(c, rt, a, pc);
+}
+inline uint64_t lwr_recompiled(Context& c, uint64_t rt, uint32_t a, uint32_t pc) {
+#ifdef KI_R36S_FAST_MEMORY
+    if (c.fast_mips_memory) {
+        const unsigned sh = 8u * (a & 3u);
+        const uint32_t word = load_recompiled<uint32_t>(c, a & ~3u, pc);
+        const uint32_t mask = 0xffffffffu >> sh;
+        return sx32((lo32(rt) & ~mask) | (word >> sh));
+    }
+#endif
+    return lwr(c, rt, a, pc);
+}
+inline uint64_t ldl_recompiled(Context& c, uint64_t rt, uint32_t a, uint32_t pc) {
+#ifdef KI_R36S_FAST_MEMORY
+    if (c.fast_mips_memory) {
+        const unsigned k = a & 7u;
+        const uint64_t word = k <= 3
+          ? load_recompiled<uint32_t>(c, a & ~7u, pc)
+          : load_recompiled<uint64_t>(c, a & ~7u, pc);
+        const unsigned sh = 8u * (7u - k);
+        return (rt & ~(~0ull << sh)) | (word << sh);
+    }
+#endif
+    return ldl(c, rt, a, pc);
+}
+inline uint64_t ldr_recompiled(Context& c, uint64_t rt, uint32_t a, uint32_t pc) {
+#ifdef KI_R36S_FAST_MEMORY
+    if (c.fast_mips_memory) {
+        const unsigned k = a & 7u;
+        const uint64_t word = k >= 4
+          ? static_cast<uint64_t>(load_recompiled<uint32_t>(c, (a & ~7u) + 4u, pc)) << 32
+          : load_recompiled<uint64_t>(c, a & ~7u, pc);
+        const unsigned sh = 8u * k;
+        return (rt & ~(~0ull >> sh)) | (word >> sh);
+    }
+#endif
+    return ldr(c, rt, a, pc);
+}
 
 // ---- coprocessor 1 (single precision) --------------------------------------
 // Host float arithmetic is IEEE-754 binary32 with no excess precision on the
