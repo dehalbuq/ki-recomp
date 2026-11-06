@@ -72,6 +72,11 @@ public:
     // All skipped cycles remain accounted for; original interpreter is fallback.
     void enable_ki_waitloop_fastpath(bool enabled) { m_ki_waitloop_fastpath = enabled; }
     uint64_t ki_waitloop_skipped_cycles() const { return m_ki_waitloop_skipped_cycles; }
+    // Experimental, precompiled KI1 ADSP opcode path. OFF by default.
+    // Specializations are compiled privately from the user's sound ROM,
+    // but every execution is guarded by its current program-memory word.
+    void enable_native_opcodes(bool enabled) { m_native_opcode_enabled = enabled; }
+    uint64_t native_opcode_count() const { return m_native_opcode_count; }
     std::vector<std::pair<uint16_t, uint32_t>> take_pc_hotspots(
         std::size_t max_entries, uint32_t& sampled_instructions);
     // Interrupt input level (MAME execute_set_input semantics: a rising edge latches).
@@ -121,6 +126,10 @@ private:
     bool m_ki_waitloop_fastpath = false;
     uint64_t m_ki_waitloop_skipped_cycles = 0;
     bool try_ki_waitloop();
+    bool m_native_opcode_enabled = false;
+    uint64_t m_native_opcode_count = 0;
+    bool try_native_opcode(uint32_t opcode);
+    template<uint32_t Opcode> void execute_native_opcode();
     struct PcProfiler {
         std::array<uint32_t, 0x4000> counts{};
         uint32_t counter = 0;
