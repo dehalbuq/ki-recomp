@@ -1,19 +1,57 @@
-# Killer Instinct (Arcade) — experimental PortMaster port
+# Killer Instinct Arcade — R36S native ARM64 / PortMaster prototype
 
-This is an **untested R36S prototype**, not an approved PortMaster release.
+A native AArch64 statically recompiled KI arcade engine, adapted by
+[dehalbuq](https://github.com/dehalbuq) from
+[kilnan/ki-recomp](https://github.com/kilnan/ki-recomp).
+Additional components include the independently licensed SDL2,
+libchdr and MAME-derived audio core. This is **not** an official
+PortMaster submission and has no game assets included.
 
-Thank you to [kilnan](https://github.com/kilnan/ki-recomp) and the original project contributors for the C++ static recompilation. Thanks to the authors of SDL2, MAME-derived ADSP support, libchdr and rabbitizer. R36S adaptation: [dehalbuq](https://github.com/dehalbuq).
+## Minimal launch menu (Test20)
 
-## Game files
+Exactly two scripts are shipped; all earlier Test3–Test19 benchmark
+launchers have been removed from the new ZIP:
 
-The game is not included. Supply your own legally obtained arcade `kinst.zip` (BIOS L1.5D, with the sound ROMs) and `kinst.chd` under `killerinstinct/gamedata/`. The script will not download ROMs.
+- `Killer Instinct Arcade.sh` — normal optimized build: Cortex-A35
+  tuned generated MIPS (-O3), safe indirect-function cache,
+  original arcade 58.98 Hz timing, OpenGLES2 RGBA8888 / ARM NEON
+  conversion with `SDL_UpdateTexture`, 4:3 exact 2x pixel scaling,
+  full-frame rendering, experimental pitch-preserving WSOLA audio.
+  The slower Test19 direct SDL texture lock is **not** used.
+- `KI R36S - Host Profile.sh` — CPU performance diagnosis only:
+  native function PC samples, DSP timing, GPU upload and MIPS
+  indirect-lookup cache statistics. It can reduce FPS; do not
+  benchmark this launcher against normal mode.
+
+The runtime cache can be disabled for a controlled experiment by
+setting `KI_R36S_DISPATCH_BASELINE=1` in the environment before
+launching. No special PortMaster menu launcher is required.
+
+## Legal game data (not bundled)
+
+Copy your own legally obtained `kinst.zip` (with KI1 L1.5D BIOS and
+sound ROMs) and `kinst.chd` into
+`/roms/ports/killerinstinct/gamedata/`.
+This project never downloads original game ROMs or CHD automatically.
 
 ## Controls
 
-D-pad = movement; X/Y/R1 = high attacks; A/B/R2 = low attacks; Start = start; Select or L1 = coin. Hold Start+Select for about 0.8 seconds to open the pause/exit menu. Choose RESUME or EXIT with Up/Down and A; B returns to gameplay. A USB keyboard can also open the menu with F10 and exit immediately with Esc. Raw R36S Select=12 and Start=13 are read even without a GameController mapping. Actual button mapping depends on firmware's SDL2 database.
+D-pad = movement; X/Y/R1 = high attacks; A/B/R2 = low attacks.
+Start = start; Select/L1 = coin. Hold **Start + Select** for the
+pause/exit menu (~0.8 seconds). Press A to confirm RESUME/EXIT,
+or B to resume. Actual mapping depends on the firmware's SDL2 database.
 
-## Video and diagnostics
+## Performance logs
 
-The guest runs at the original ~58.98 Hz, 320x240 rendered at 640x480 in 4:3 nearest scaling. SDL2 uses accelerated rendering first, software fallback only for diagnostics. Log: `killerinstinct/logs/ki-r36s.log`. The log reports the actual guest VBLANK/frame rate every five seconds; use this to measure real FPS and diagnose the bottleneck.
+Normal log: `killerinstinct/logs/ki-r36s.log`.
+CPU diagnostic log: `killerinstinct/logs/ki-r36s-test20-cpu-profile.log`.
 
-**Not ready for PortMaster submission:** test the ARM64 binary on ArkOS/DarkOSre, validate glibc and dependencies, add a real gameplay screenshot and optional cover art. Never bundle the game's data in public packages.
+Test19 on dArkOSRE measured 52.38 FPS average with NEON Update
+versus 50.78 with NEON Locked and 52.17 with Scalar Locked.
+NEON NoClear registered 54.03 FPS, but had different scene durations
+and its speedup remains unproven; removing SDL clear is not default.
+
+See `docs/R36S_TEST20_RECOMPILER.md` for Test20 measurements,
+correctness checks, and limitations. The GLIBC and SDL2 requirements
+of a GitHub-hosted Ubuntu ARM64 build may differ from the user's
+firmware; verify on the actual R36S.
