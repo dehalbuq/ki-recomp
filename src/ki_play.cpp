@@ -210,8 +210,8 @@ int main(int argc, char** argv) {
     constexpr bool r36s_host_profile = false;
     constexpr bool r36s_gpu_profile = false;
     constexpr bool r36s_no_clear = false;
-    constexpr bool r36s_fast_rgba = true;
-    constexpr bool r36s_direct_texture = false;
+    bool r36s_fast_rgba = true;
+    bool r36s_direct_texture = false;
     constexpr bool r36s_rgba_scalar = false;
     constexpr int r36s_bench_render_every = 1;
 #else
@@ -557,7 +557,7 @@ int main(int argc, char** argv) {
     auto r36s_sample_start = std::chrono::steady_clock::now();
     unsigned r36s_sample_frames = 0;
     // Optional deterministic PCM trace for interpreter vs future KI HLE tests.
-    // Only enabled in a diagnostic launcher; zero per-sample cost normally.
+    // Only enabled in diagnostic builds.
     uint64_t r36s_audio_samples = 0;
     uint64_t r36s_audio_hash = 14695981039346656037ull; // FNV-1a 64-bit offset basis
     unsigned r36s_present_frames = 0;
@@ -1213,6 +1213,7 @@ int main(int argc, char** argv) {
 #ifdef KI_R36S
             if (r36s_dsp_hotspots && frame % 300 == 0)
                 dcs->log_pc_hotspots(frame);
+#ifndef KI_R36S_RELEASE_CLEAN
             if (r36s_audio_trace) {
                 // Hash PCM bytes in little-endian sample order, so the log can
                 // be compared at equal guest frame numbers across engines.
@@ -1231,6 +1232,7 @@ int main(int argc, char** argv) {
                         dcs->sample_rate());
                 }
             }
+#endif // !KI_R36S_RELEASE_CLEAN
 #endif
 #ifdef KI_R36S
             if (audio && !frame_turbo && r36s_audio_smooth) {
