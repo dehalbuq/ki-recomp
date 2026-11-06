@@ -368,6 +368,9 @@ int main(int argc, char** argv) {
     c.fast_cop0 = std::getenv("KI_R36S_COP0_BASELINE") == nullptr;
     std::fprintf(stderr, "[r36s] COP0 MFC0 inlining: %s\n",
                  c.fast_cop0 ? "ON" : "OFF (baseline)");
+    c.fast_mips_idle = std::getenv("KI_R36S_MIPS_IDLE") != nullptr;
+    std::fprintf(stderr, "[r36s] MIPS event-driven idle accelerator: %s\n",
+                 c.fast_mips_idle ? "ON (experimental)" : "OFF");
 #endif
     static ki::KinstBoard board(std::move(disk_image), std::move(boot_rom));
     c.io = &board;
@@ -453,6 +456,7 @@ int main(int argc, char** argv) {
     unsigned r36s_present_frames = 0;
     uint64_t r36s_waitloop_last = 0;
     uint64_t r36s_native_opcode_last = 0;
+    uint64_t r36s_mips_idle_last = 0;
     double r36s_render_ms = 0, r36s_rgb_ms = 0, r36s_swap_ms = 0;
     auto r36s_cpu_begin = std::clock();
     auto r36s_proc_read_bytes = []() -> unsigned long long {
@@ -826,6 +830,15 @@ int main(int argc, char** argv) {
                 r36s_rss_kib() / 1024.0, r36s_cpu_khz());
             if (r36s_host_profile)
                 ki_r36s::host_profiler::report(r36s_sample_frames);
+            if (c.fast_mips_idle) {
+                const uint64_t saved = c.mips_idle_skipped_cycles;
+                std::fprintf(stderr, "[r36s] MIPS_IDLE saved=%llu cycles_this_window total=%llu iterations=%llu\n",
+                    static_cast<unsigned long long>(saved >= r36s_mips_idle_last
+                        ? saved - r36s_mips_idle_last : 0u),
+                    static_cast<unsigned long long>(saved),
+                    static_cast<unsigned long long>(c.mips_idle_skipped_iterations));
+                r36s_mips_idle_last = saved;
+            }
             if (dcs && r36s_time_dsp) {
                 auto time = dcs->take_timing_sample();
                 const double dsp_wall_ms = static_cast<double>(time.host_ns) * 1.0e-6;
