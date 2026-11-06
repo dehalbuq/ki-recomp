@@ -11,9 +11,9 @@
     "porter": [
       "dehalbuq"
     ],
-    "desc": "Independent experimental R36S ARM64 port of kilnan's static Killer Instinct recompilation. GLES2/NEON, Audio Smooth, 4:3.",
+    "desc": "Native ARM64 R36S KI port with dual executable ABI (dArkOSRE >=2.38/ArkOS4Clone >=2.28), selection by firmware glibc.",
     "desc_md": null,
-    "inst": "Provide your own lawful kinst.zip (L1.5D BIOS) and kinst.chd in killerinstinct/gamedata. Game code is statically recompiled; review legal notice and distribution rights.",
+    "inst": "Supply your own lawful kinst.zip (KI1 L1.5D) and kinst.chd in killerinstinct/gamedata; dual ABI binaries selected automatically.",
     "inst_md": null,
     "genres": [
       "fighting"
@@ -28,6 +28,6 @@
     "arch": [
       "aarch64"
     ],
-    "min_glibc": ""
+    "min_glibc": "2.28"
   }
 }
