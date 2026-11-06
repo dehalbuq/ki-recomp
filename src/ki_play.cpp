@@ -368,9 +368,12 @@ int main(int argc, char** argv) {
     c.fast_cop0 = std::getenv("KI_R36S_COP0_BASELINE") == nullptr;
     std::fprintf(stderr, "[r36s] COP0 MFC0 inlining: %s\n",
                  c.fast_cop0 ? "ON" : "OFF (baseline)");
-    c.fast_mips_idle = std::getenv("KI_R36S_MIPS_IDLE") != nullptr;
+    // Test14 showed a repeatable, large speedup on the actual RK3326:
+    // make its verified IRQ-idle path the default. The baseline launcher
+    // can still disable it for A/B tests or any unexpected gameplay issue.
+    c.fast_mips_idle = std::getenv("KI_R36S_MIPS_IDLE_BASELINE") == nullptr;
     std::fprintf(stderr, "[r36s] MIPS event-driven idle accelerator: %s\n",
-                 c.fast_mips_idle ? "ON (experimental)" : "OFF");
+                 c.fast_mips_idle ? "ON (default)" : "OFF (baseline)");
     c.fast_mips_memory = std::getenv("KI_R36S_MEM_BASELINE") == nullptr;
     std::fprintf(stderr, "[r36s] MIPS physical RAM fastpath: %s\n",
                  c.fast_mips_memory ? "ON" : "OFF (baseline)");
