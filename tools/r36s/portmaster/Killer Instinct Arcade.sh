@@ -19,6 +19,48 @@ mkdir -p "$GAMEDIR/logs" "$GAMEDIR/conf"
 LOG="$GAMEDIR/logs/${KI_R36S_LOG_BASENAME:-ki-r36s}.log"
 exec > >(tee "$LOG") 2>&1
 
+# One-time Test20 migration: PortMaster extraction overlays older packages
+# without deleting old launchers. Remove ONLY 23 exact previous KI benchmark
+# filenames, not custom ports, the main launcher, CPU profiler, logs or saves.
+legacy_ki_launchers=(
+  "KI R36S - Audio Trace.sh"
+  "KI R36S - COP0 Baseline.sh"
+  "KI R36S - Compiler O3.sh"
+  "KI R36S - DSP Benchmark.sh"
+  "KI R36S - DSP Bus Baseline.sh"
+  "KI R36S - DSP Compiled.sh"
+  "KI R36S - DSP Hotspots.sh"
+  "KI R36S - DSP Loop Baseline.sh"
+  "KI R36S - DSP Timing Baseline.sh"
+  "KI R36S - DSP Timing.sh"
+  "KI R36S - GLES2 RGBA Fast.sh"
+  "KI R36S - Graphics Profile.sh"
+  "KI R36S - MIPS Baseline.sh"
+  "KI R36S - MIPS Turbo.sh"
+  "KI R36S - Memory Baseline.sh"
+  "KI R36S - RGBA Audio Original.sh"
+  "KI R36S - RGBA Audio Smooth.sh"
+  "KI R36S - Test19 NEON Locked.sh"
+  "KI R36S - Test19 NEON NoClear.sh"
+  "KI R36S - Test19 NEON Update.sh"
+  "KI R36S - Test19 Scalar Locked.sh"
+  "KI R36S - VBlank Fast Experiment.sh"
+  "KI R36S - Video Benchmark.sh"
+)
+legacy_removed=0
+for legacy in "${legacy_ki_launchers[@]}"; do
+  if [ -f "$PORTS/$legacy" ]; then
+    if rm -f -- "$PORTS/$legacy"; then
+      legacy_removed=$((legacy_removed + 1))
+    else
+      echo "[r36s] WARNING: could not remove obsolete launcher: $legacy"
+    fi
+  fi
+done
+if [ "$legacy_removed" -gt 0 ]; then
+  echo "[r36s] Test20 migration: removed $legacy_removed obsolete KI launchers; reboot/refresh Ports list if needed."
+fi
+
 echo "KI R36S prototype | $(date -Iseconds)"
 echo "Kernel: $(uname -r), architecture: $(uname -m)"
 XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
