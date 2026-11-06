@@ -1,13 +1,14 @@
-# Copy to .github/workflows/build-r36s.yml in a NEW PRIVATE repository.
-# The PUBLIC fork must NEVER contain the arcade game ROMs or CHD.
-# Private repo inputs: data/kinst.zip + data/kinst.chd (Git LFS).
-name: Killer Instinct R36S - PRIVATE ARM64 build
+# Install this file as .github/workflows/build-r36s.yml in a NEW PRIVATE repo.
+# Put your lawfully acquired data/kinst.zip and data/kinst.chd there with Git LFS.
+# NEVER copy these files, game-derived translated code or built executables to
+# the PUBLIC ki-recomp fork. The CI artifact must remain PRIVATE.
+name: KI R36S Test18 - PRIVATE optimized ARM64 build
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  build:
+  test18:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     steps:
@@ -16,7 +17,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             git git-lfs gcc g++ make cmake ninja-build python3-venv \
-            python3-dev pkg-config libsdl2-dev file binutils
+            python3-dev pkg-config libsdl2-dev file binutils \
+            zlib1g-dev liblzma-dev libzstd-dev
       - name: Checkout PRIVATE game inputs with Git LFS
         uses: actions/checkout@v4
         with:
@@ -30,7 +32,15 @@ jobs:
           ref: port/r36s-portmaster
           path: ki-recomp
           persist-credentials: false
-      - name: Validate and extract game files (private runner only)
+      - name: Verify Test18 A/B launchers are from public source
+        working-directory: ki-recomp
+        run: |
+          test -f 'tools/r36s/portmaster/KI R36S - RGBA Audio Original.sh'
+          test -f 'tools/r36s/portmaster/KI R36S - RGBA Audio Smooth.sh'
+          grep -q 'KI_R36S_GLES2_RGBA=1' 'tools/r36s/portmaster/KI R36S - RGBA Audio Original.sh'
+          grep -q 'KI_R36S_AUDIO_SMOOTH=1' 'tools/r36s/portmaster/KI R36S - RGBA Audio Smooth.sh'
+          git rev-parse --short HEAD
+      - name: Validate game files and prepare private recompiler inputs
         working-directory: ki-recomp
         run: |
           python3 -m venv .venv
@@ -38,24 +48,44 @@ jobs:
           python3 tools/r36s/prepare_data.py \
             "$GITHUB_WORKSPACE/private-inputs/data/kinst.zip" \
             "$GITHUB_WORKSPACE/private-inputs/data/kinst.chd"
-      - name: Build ARM64 executable
+      - name: Build optimized ARM64 executable (full MIPS + DSP + RGBA + WSOLA)
         working-directory: ki-recomp
         env:
-          KI_BUILD_TYPE: Debug
+          KI_BUILD_TYPE: Release
+          KI_R36S_MIPS_O3: "ON"
           KI_JOBS: "2"
         run: |
           bash tools/r36s/build.sh
+          test -s build-r36s/ki_play
           file build-r36s/ki_play
           readelf -h build-r36s/ki_play | grep 'Machine:.*AArch64'
-      - name: Package without original ROMs or CHD
+          echo '--- Linked shared libraries (verify DarkOSre/ArkOS compatibility on device) ---'
+          readelf -d build-r36s/ki_play | grep NEEDED || true
+          readelf --version-info build-r36s/ki_play | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -Vu | tail -8 || true
+      - name: Package Test18 comparison launchers without ROMs or CHD
         working-directory: ki-recomp
         run: |
           python3 tools/r36s/package_port.py build-r36s/ki_play \
-            --output "$GITHUB_WORKSPACE/KI-R36S-private-debug.zip"
-      - name: Save result as PRIVATE short-lived artifact
+            --output "$GITHUB_WORKSPACE/KI-R36S-Test18-RGBA-WSOLA-private.zip"
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+          archive = Path("../KI-R36S-Test18-RGBA-WSOLA-private.zip")
+          with zipfile.ZipFile(archive) as z:
+              names = set(z.namelist())
+              assert "killerinstinct/ki_play.aarch64" in names
+              for name in ["KI R36S - RGBA Audio Original.sh", "KI R36S - RGBA Audio Smooth.sh"]:
+                  assert name in names, f"Missing launcher: {name}"
+              forbidden = {n for n in names if n.endswith((".chd", ".bin", ".u98")) or
+                           n.lower().endswith("/kinst.zip")}
+              assert not forbidden, f"Game data accidentally packaged: {forbidden}"
+              assert z.testzip() is None
+          print("Private Test18 ZIP verified: AArch64 ELF + both A/B launchers; no ROM or CHD")
+          PY
+      - name: Save Test18 build as PRIVATE short-lived artifact
         uses: actions/upload-artifact@v4
         with:
-          name: KI-R36S-private-debug
-          path: KI-R36S-private-debug.zip
+          name: KI-R36S-Test18-RGBA-WSOLA-private
+          path: KI-R36S-Test18-RGBA-WSOLA-private.zip
           if-no-files-found: error
           retention-days: 3
