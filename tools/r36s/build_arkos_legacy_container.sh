@@ -99,6 +99,15 @@ cp -L "$(g++ -print-file-name=libstdc++.so.6)" \
   build-arkos-deps/libs.glibc230/libstdc++.so.6
 cp -L "$(gcc -print-file-name=libgcc_s.so.1)" \
   build-arkos-deps/libs.glibc230/libgcc_s.so.1
+# The legacy package includes a locally patched SDL2 2.30.12, so
+# preserve its original zlib license and disclose the KMSDRM changes.
+cp "build-arkos-deps/SDL2-${SDL_VERSION}/LICENSE.txt" \
+  build-arkos-deps/libs.glibc230/LICENSE.SDL2.txt
+printf '%s\n' \
+  "SDL2 ${SDL_VERSION}, modified by dehalbuq R36S project for KMSDRM:" \
+  "added GBM XRGB8888/ARGB8888/RGB565 surface retries for legacy Mali." \
+  "Original SDL2 copyright and license: see LICENSE.SDL2.txt" \
+  > build-arkos-deps/libs.glibc230/SDL2-MODIFICATIONS.txt
 
 "$PYTHON" tools/r36s/audit_legacy_abi.py --max-glibc 2.30 \
   build-r36s-legacy/ki_play build-arkos-deps/libs.glibc230
