@@ -59,6 +59,12 @@ jobs:
         run: |
           c++ -std=c++20 -O3 -DNDEBUG -fsyntax-only             -DKI_R36S=1 -DKI_R36S_RELEASE_CLEAN=1             -Iruntime/include -Ithird_party/adsp2100 -Isrc             $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
           c++ -std=c++20 -O3 -DNDEBUG -fsyntax-only             -DKI_R36S_FAST_DISPATCH=1 -DKI_R36S_RELEASE_CLEAN=1             -Iruntime/include -Ithird_party/adsp2100 runtime/src/runtime.cpp
+      - name: Validate startup credits and legal page on headless ARM64 SDL2
+        run: |
+          c++ -std=c++20 -O2 -Wall -Wextra -Isrc \
+            $(sdl2-config --cflags) tests/r36s_intro_selftest.cpp \
+            $(sdl2-config --libs) -o /tmp/ki-r36s-intro-selftest
+          SDL_VIDEODRIVER=dummy /tmp/ki-r36s-intro-selftest
       - name: Check launchers, build scripts and metadata
         run: |
           bash -n tools/r36s/build.sh tools/r36s/diagnose.sh
