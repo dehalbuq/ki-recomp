@@ -197,6 +197,10 @@ int main(int argc, char** argv) {
     // Disable it to avoid expensive blocking at SDL_RenderPresent, but keep
     // the existing guest 58.98 Hz frame pacer, so game speed does not increase.
     SDL_SetHintWithPriority(SDL_HINT_RENDER_VSYNC, "0", SDL_HINT_OVERRIDE);
+    // Both modes preserve the exact same audio and accelerated blue boot.
+    const bool r36s_audio_smooth = std::getenv("KI_R36S_AUDIO_SMOOTH") != nullptr;
+    const char* boot_blue_setting = std::getenv("KI_R36S_BOOT_BLUE_FAST");
+    const bool r36s_boot_blue_enabled = boot_blue_setting && boot_blue_setting[0] != '0';
 #ifdef KI_R36S_RELEASE_CLEAN
     // No diagnostics or A/B benchmark paths in the final player.
     constexpr bool r36s_bench_no_dcs = false;
@@ -213,12 +217,6 @@ int main(int argc, char** argv) {
 #else
     const bool r36s_bench_no_dcs = std::getenv("KI_R36S_BENCH_NO_DCS") != nullptr;
     const bool r36s_audio_trace = std::getenv("KI_R36S_AUDIO_TRACE") != nullptr;
-    const bool r36s_audio_smooth = std::getenv("KI_R36S_AUDIO_SMOOTH") != nullptr;
-    // Test21: fast-forward *only* a confirmed early blue descending wipe.
-    // Disabled with KI_R36S_BOOT_BLUE_FAST=0; no gameplay speed changes.
-    const char* boot_blue_setting = std::getenv("KI_R36S_BOOT_BLUE_FAST");
-    const bool r36s_boot_blue_enabled = boot_blue_setting &&
-        boot_blue_setting[0] != '0';
     std::fprintf(stderr, "[r36s] pitch-preserving adaptive audio: %s\n",
                  r36s_audio_smooth ? "ON (experimental WSOLA)" : "OFF (original DSP output)");
     const bool r36s_dsp_hotspots = std::getenv("KI_R36S_DSP_HOTSPOTS") != nullptr;
