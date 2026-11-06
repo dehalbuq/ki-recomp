@@ -17,7 +17,58 @@ export KI_R36S_AUDIO_SMOOTH=1
 export KI_R36S_BOOT_BLUE_FAST="${KI_R36S_BOOT_BLUE_FAST:-1}"
 # Obsolete Test19 candidates must never leak into the optimized default.
 unset KI_R36S_DIRECT_TEXTURE KI_R36S_RGBA_SCALAR KI_R36S_NO_CLEAR
-BIN="$GAMEDIR/${KI_R36S_BINARY:-ki_play.aarch64}"
+# Dual ABI PortMaster: resolve the native firmware GLIBC once at startup.
+# dArkOSRE modern candidate needs GLIBC >= 2.38; the legacy binary is
+# compiled in a GLIBC 2.28 container for older ArkOS4Clone variants.
+# Never load the modern binary on a firmware whose libc is too old.
+get_firmware_glibc() {
+  local v=''
+  v="$(LC_ALL=C getconf GNU_LIBC_VERSION 2>/dev/null)" || true
+  if [[ "$v" =~ ^glibc[[:space:]]+([0-9]+)\.([0-9]+)$ ]]; then
+    printf '%s %s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    return 0
+  fi
+  return 1
+}
+select_ki_binary() {
+  local major minor
+  if [ "$(uname -m)" != "aarch64" ]; then
+    echo "ERROR: this PortMaster release needs a 64-bit ARM (AArch64) firmware."
+    return 10
+  fi
+  if ! read -r major minor < <(get_firmware_glibc); then
+    echo "ERROR: cannot determine firmware glibc using getconf GNU_LIBC_VERSION."
+    echo "Refusing to guess an ABI or replace system libc; run the firmware diagnostic."
+    return 11
+  fi
+  echo "Firmware glibc: $major.$minor"
+  if [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 38 ]; }; then
+    BIN="$GAMEDIR/ki_play.aarch64"
+    KI_LIBS="$GAMEDIR/libs.aarch64"
+    KI_VARIANT="modern dArkOSRE (glibc >= 2.38)"
+  elif [ "$major" -eq 2 ] && [ "$minor" -ge 28 ]; then
+    BIN="$GAMEDIR/ki_play.glibc230.aarch64"
+    KI_LIBS="$GAMEDIR/libs.glibc230"
+    KI_VARIANT="legacy ArkOS4Clone (glibc 2.28-2.37)"
+  else
+    echo "ERROR: glibc $major.$minor is older than the supported 2.28 minimum."
+    return 12
+  fi
+  if [ ! -f "$BIN" ]; then
+    echo "ERROR: missing $KI_VARIANT executable: $BIN"
+    echo "Install the unified dual-ABI ZIP; do not run a newer binary manually."
+    return 13
+  fi
+  echo "Selected: $KI_VARIANT => $(basename "$BIN")"
+  if [ -d "$KI_LIBS" ]; then
+    export LD_LIBRARY_PATH="$KI_LIBS:${LD_LIBRARY_PATH:-}"
+    echo "Per-variant libraries: $KI_LIBS"
+  fi
+  return 0
+}
+BIN=""
+KI_LIBS=""
+KI_VARIANT=""
 mkdir -p "$GAMEDIR/logs" "$GAMEDIR/conf"
 LOG="$GAMEDIR/logs/${KI_R36S_LOG_BASENAME:-ki-r36s}.log"
 exec > >(tee "$LOG") 2>&1
@@ -64,7 +115,7 @@ if [ "$legacy_removed" -gt 0 ]; then
   echo "[r36s] Test20 migration: removed $legacy_removed obsolete KI launchers; reboot/refresh Ports list if needed."
 fi
 
-echo "KI R36S prototype | $(date -Iseconds)"
+echo "KI R36S dual ARM64 | $(date -Iseconds)"
 echo "Kernel: $(uname -r), architecture: $(uname -m)"
 XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 controlfolder=''
@@ -83,9 +134,10 @@ else
   echo "WARNING: PortMaster control.txt was not found; falling back to firmware SDL2 settings."
 fi
 
-if [ ! -f "$BIN" ]; then
-  echo "ERROR: no compiled ARM64 binary at $BIN"
-  exit 127
+if ! select_ki_binary; then exit $?; fi
+if [ "${KI_R36S_ABI_SELECT_ONLY:-0}" = 1 ]; then
+  echo "ABI selection check only: complete (game not started)"
+  exit 0
 fi
 if [ ! -f "$GAMEDIR/gamedata/kinst.zip" ] || [ ! -f "$GAMEDIR/gamedata/kinst.chd" ]; then
   echo "ERROR: place your own kinst.zip and kinst.chd in $GAMEDIR/gamedata"
@@ -95,9 +147,8 @@ export XDG_DATA_HOME="$GAMEDIR/conf"
 if [ -n "${sdl_controllerconfig:-}" ]; then
   export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 fi
-if [ -d "$GAMEDIR/libs.aarch64" ]; then
-  export LD_LIBRARY_PATH="$GAMEDIR/libs.aarch64:${LD_LIBRARY_PATH:-}"
-fi
+# Library search path was selected together with the binary above.
+# Do not bundle, override or upgrade the firmware's GLIBC/ld-linux/GBM/EGL.
 export SDL_RENDER_SCALE_QUALITY=0
 echo "SDL video: ${SDL_VIDEODRIVER:-auto}; SDL audio: ${SDL_AUDIODRIVER:-auto}"
 chmod +x "$BIN" || true
