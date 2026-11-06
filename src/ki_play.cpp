@@ -57,6 +57,7 @@
 #include "ki_r36s_host_profiler.h"
 #include "ki_r36s_gfx_profiler.h"
 #include "ki_r36s_audio_smooth.h"
+#include "ki/rgb555_upload.h"
 #endif
 #ifdef KI_HAVE_FILES
 #include "ki_files.h"
@@ -206,6 +207,11 @@ int main(int argc, char** argv) {
     // Test17: native SDL/GLES2 ABGR8888 upload with EXACT RGB555 colours.
     // RGB24 is still the normal release path and available as an A/B control.
     bool r36s_fast_rgba = std::getenv("KI_R36S_GLES2_RGBA") != nullptr;
+    // Test19 A/B: direct SDL/GLES2 texture lock avoids intermediate RGBA
+    // framebuffer and its extra 307 KB/frame CPU copy, where supported.
+    bool r36s_direct_texture = std::getenv("KI_R36S_DIRECT_TEXTURE") != nullptr;
+    // Compare NEON conversion against the exact scalar reference on RK3326.
+    const bool r36s_rgba_scalar = std::getenv("KI_R36S_RGBA_SCALAR") != nullptr;
     const int r36s_bench_render_every = std::getenv("KI_R36S_BENCH_RENDER_QUARTER") ? 4 : 1;
     std::fprintf(stderr, "[r36s] fullscreen 4:3 / nearest / original 58.98 Hz timing; VSync requested OFF\n");
     if (r36s_bench_no_dcs)
@@ -298,6 +304,19 @@ int main(int argc, char** argv) {
     }
 #ifdef KI_R36S
     SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
+    if (r36s_direct_texture && !r36s_fast_rgba) {
+        std::fprintf(stderr,
+            "[r36s] TEST19: locked texture requires RGBA; using baseline SDL_UpdateTexture\n");
+        r36s_direct_texture = false;
+    }
+    std::fprintf(stderr, "[r36s] TEST19 convert=%s upload=%s (direct lock auto-fallback)\n",
+        r36s_rgba_scalar ? "scalar reference" :
+#if defined(__aarch64__) && defined(__ARM_NEON)
+        "AArch64 NEON SIMD",
+#else
+        "scalar (NEON unavailable)",
+#endif
+        r36s_direct_texture ? "SDL_LockTexture direct" : "SDL_UpdateTexture");
 #endif
     SDL_Texture* hd_texture = nullptr;  // 4x picture when an HD pack is loaded (H toggles)
 
@@ -512,6 +531,7 @@ int main(int argc, char** argv) {
     double r36s_render_ms = 0, r36s_rgb_ms = 0, r36s_swap_ms = 0;
     // Diagnostic-only split of SDL/ES2 upload vs. draw submission.
     double r36s_tex_upload_ms = 0, r36s_gpu_copy_ms = 0;
+    double r36s_direct_convert_ms = 0;
     auto r36s_cpu_begin = std::clock();
     auto r36s_proc_read_bytes = []() -> unsigned long long {
         std::ifstream file("/proc/self/io");
@@ -567,7 +587,17 @@ int main(int argc, char** argv) {
 #ifdef KI_R36S
         const auto rgb_begin = std::chrono::steady_clock::now();
         if (r36s_fast_rgba) {
-            board.framebuffer_rgba_into(ctx, r36s_frame_rgba);
+            if (!r36s_direct_texture) {
+                if (r36s_rgba_scalar) {
+                    r36s_frame_rgba.resize(320u * 240u);
+                    ki::rgb555_to_abgr8888_image_bytes(
+                        ctx.sram.data() + board.displayed_bank(),
+                        reinterpret_cast<uint8_t*>(r36s_frame_rgba.data()),
+                        320u * 240u, false);
+                } else {
+                    board.framebuffer_rgba_into(ctx, r36s_frame_rgba);
+                }
+            }
             // R36S always uses 4:3, but retain the ambient RGB24 fallback
             // should a future test switch the physical aspect mode.
             if (wide) board.framebuffer_rgb_into(ctx, r36s_frame_rgb);
@@ -645,10 +675,39 @@ int main(int argc, char** argv) {
                                              : std::chrono::steady_clock::time_point{};
 #endif
 #ifdef KI_R36S
-            if (r36s_fast_rgba)
+            if (r36s_fast_rgba && r36s_direct_texture) {
+                void* locked_pixels = nullptr;
+                int locked_pitch = 0;
+                const int lock_result = SDL_LockTexture(
+                    texture, nullptr, &locked_pixels, &locked_pitch);
+                if (lock_result == 0 && locked_pixels && locked_pitch >= 320*4) {
+                    const auto convert_begin = timing_gpu ? std::chrono::steady_clock::now()
+                        : std::chrono::steady_clock::time_point{};
+                    ki::rgb555_to_abgr8888_pitched(
+                        ctx.sram.data() + board.displayed_bank(),
+                        static_cast<uint8_t*>(locked_pixels),
+                        320u, 240u, static_cast<size_t>(locked_pitch),
+                        !r36s_rgba_scalar);
+                    if (timing_gpu)
+                        r36s_direct_convert_ms += std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - convert_begin).count();
+                    SDL_UnlockTexture(texture);
+                } else {
+                    // Firmware SDL2 drivers may reject streaming texture locks:
+                    // log once then permanently use the tested RGBA Update path.
+                    if (lock_result == 0) SDL_UnlockTexture(texture);
+                    std::fprintf(stderr,
+                        "[r36s] TEST19 direct texture unsupported (pitch=%d): %s; fallback=RGBA Update\n",
+                        locked_pitch, SDL_GetError());
+                    r36s_direct_texture = false;
+                    board.framebuffer_rgba_into(ctx, r36s_frame_rgba);
+                    SDL_UpdateTexture(texture, nullptr, r36s_frame_rgba.data(), 320 * 4);
+                }
+            } else if (r36s_fast_rgba) {
                 SDL_UpdateTexture(texture, nullptr, r36s_frame_rgba.data(), 320 * 4);
-            else
+            } else {
                 SDL_UpdateTexture(texture, nullptr, rgb.data(), 320 * 3);
+            }
 #else
             SDL_UpdateTexture(texture, nullptr, rgb.data(), 320 * 3);
 #endif
@@ -970,6 +1029,10 @@ int main(int argc, char** argv) {
                     r36s_swap_ms / render_div,
                     r36s_rgb_ms / render_div,
                     r36s_present_frames);
+                std::fprintf(stderr,
+                    "[r36s] TEST19 direct_texture_active=%d scalar=%d locked_convert_ms_per_frame=%.3f\n",
+                    r36s_direct_texture ? 1 : 0, r36s_rgba_scalar ? 1 : 0,
+                    r36s_direct_convert_ms / render_div);
             }
             if (c.fast_mips_idle) {
                 const uint64_t saved = c.mips_idle_skipped_cycles;
@@ -1019,6 +1082,7 @@ int main(int argc, char** argv) {
             r36s_present_frames = 0;
             r36s_render_ms = r36s_rgb_ms = r36s_swap_ms = 0.0;
             r36s_tex_upload_ms = r36s_gpu_copy_ms = 0.0;
+            r36s_direct_convert_ms = 0.0;
             r36s_sample_frames = 0;
             r36s_sample_start = stamp;
         }
