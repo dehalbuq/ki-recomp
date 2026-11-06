@@ -206,6 +206,9 @@ int main(int argc, char** argv) {
     const bool r36s_host_profile = std::getenv("KI_R36S_HOST_PROFILE") != nullptr;
     // Only measure SDL texture upload, without timing every MIPS blitter.
     const bool r36s_gpu_profile = std::getenv("KI_R36S_GPU_PROFILE") != nullptr;
+    // Test19: the 320x240 opaque game texture covers the entire 4:3 panel.
+    // Opt-in: skip redundant clear of the same framebuffer each frame.
+    const bool r36s_no_clear = std::getenv("KI_R36S_NO_CLEAR") != nullptr;
     // Test17: native SDL/GLES2 ABGR8888 upload with EXACT RGB555 colours.
     // RGB24 is still the normal release path and available as an A/B control.
     bool r36s_fast_rgba = std::getenv("KI_R36S_GLES2_RGBA") != nullptr;
@@ -311,6 +314,8 @@ int main(int argc, char** argv) {
             "[r36s] TEST19: locked texture requires RGBA; using baseline SDL_UpdateTexture\n");
         r36s_direct_texture = false;
     }
+    std::fprintf(stderr, "[r36s] TEST19 optional opaque fullscreen no-clear=%d\n",
+                 r36s_no_clear ? 1 : 0);
     std::fprintf(stderr, "[r36s] TEST19 convert=%s upload=%s (direct lock auto-fallback)\n",
         r36s_rgba_scalar ? "scalar reference" :
 #if defined(__aarch64__) && defined(__ARM_NEON)
@@ -584,8 +589,15 @@ int main(int argc, char** argv) {
 #ifdef KI_R36S
         const auto render_begin = std::chrono::steady_clock::now();
 #endif
+#ifdef KI_R36S
+        if (!r36s_no_clear || wide) {
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+            SDL_RenderClear(renderer);
+        }
+#else
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
+#endif
 #ifdef KI_R36S
         const auto rgb_begin = std::chrono::steady_clock::now();
         if (r36s_fast_rgba) {
