@@ -199,6 +199,9 @@ int main(int argc, char** argv) {
     const bool r36s_dsp_hotspots = std::getenv("KI_R36S_DSP_HOTSPOTS") != nullptr;
     const bool r36s_time_dsp = std::getenv("KI_R36S_TIME_DSP") != nullptr;
     const bool r36s_host_profile = std::getenv("KI_R36S_HOST_PROFILE") != nullptr;
+    // Test17: native SDL/GLES2 ABGR8888 upload with EXACT RGB555 colours.
+    // RGB24 is still the normal release path and available as an A/B control.
+    bool r36s_fast_rgba = std::getenv("KI_R36S_GLES2_RGBA") != nullptr;
     const int r36s_bench_render_every = std::getenv("KI_R36S_BENCH_RENDER_QUARTER") ? 4 : 1;
     std::fprintf(stderr, "[r36s] fullscreen 4:3 / nearest / original 58.98 Hz timing; VSync requested OFF\n");
     if (r36s_bench_no_dcs)
@@ -264,8 +267,26 @@ int main(int argc, char** argv) {
     set_aspect(wide);
     SDL_Texture* ambient = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 40, 30);
     SDL_SetTextureScaleMode(ambient, SDL_ScaleModeLinear);
+#ifdef KI_R36S
+    const Uint32 frame_texture_format = r36s_fast_rgba ?
+        SDL_PIXELFORMAT_ABGR8888 : SDL_PIXELFORMAT_RGB24;
+#else
+    const Uint32 frame_texture_format = SDL_PIXELFORMAT_RGB24;
+#endif
     SDL_Texture* texture =
-        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 320, 240);
+        SDL_CreateTexture(renderer, frame_texture_format, SDL_TEXTUREACCESS_STREAMING, 320, 240);
+#ifdef KI_R36S
+    if (!texture && r36s_fast_rgba) {
+        std::fprintf(stderr, "[r36s] GLES2 RGBA texture unavailable: %s; falling back to RGB24\n",
+                     SDL_GetError());
+        r36s_fast_rgba = false;
+        texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 320, 240);
+    }
+    std::fprintf(stderr, "[r36s] GLES2 framebuffer upload: %s, texture=%s, bytes_per_frame=%u\n",
+        r36s_fast_rgba ? "ABGR8888 (native RGBA)" : "RGB24 (baseline)",
+        SDL_GetPixelFormatName(r36s_fast_rgba ? SDL_PIXELFORMAT_ABGR8888 : SDL_PIXELFORMAT_RGB24),
+        r36s_fast_rgba ? 320u * 240u * 4u : 320u * 240u * 3u);
+#endif
     if (!texture) {
         std::fprintf(stderr, "SDL_CreateTexture failed: %s\n", SDL_GetError());
         SDL_Quit();
@@ -496,6 +517,9 @@ int main(int argc, char** argv) {
     unsigned long long r36s_read_begin = r36s_proc_read_bytes();
     std::vector<uint8_t> r36s_frame_rgb;
     r36s_frame_rgb.reserve(320 * 240 * 3);
+    // Preallocated (resized once) and reused: no per-frame GPU staging alloc.
+    std::vector<uint32_t> r36s_frame_rgba;
+    if (r36s_fast_rgba) r36s_frame_rgba.reserve(320 * 240);
 #endif
     uint64_t saved_writes = 0;
     uint64_t title_reset_frame = 0;
@@ -518,7 +542,14 @@ int main(int argc, char** argv) {
         SDL_RenderClear(renderer);
 #ifdef KI_R36S
         const auto rgb_begin = std::chrono::steady_clock::now();
-        board.framebuffer_rgb_into(ctx, r36s_frame_rgb);
+        if (r36s_fast_rgba) {
+            board.framebuffer_rgba_into(ctx, r36s_frame_rgba);
+            // R36S always uses 4:3, but retain the ambient RGB24 fallback
+            // should a future test switch the physical aspect mode.
+            if (wide) board.framebuffer_rgb_into(ctx, r36s_frame_rgb);
+        } else {
+            board.framebuffer_rgb_into(ctx, r36s_frame_rgb);
+        }
         const std::vector<uint8_t>& rgb = r36s_frame_rgb;
         r36s_rgb_ms += std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - rgb_begin).count();
@@ -589,7 +620,14 @@ int main(int argc, char** argv) {
             const auto gpu_begin = timing_gpu ? std::chrono::steady_clock::now()
                                              : std::chrono::steady_clock::time_point{};
 #endif
+#ifdef KI_R36S
+            if (r36s_fast_rgba)
+                SDL_UpdateTexture(texture, nullptr, r36s_frame_rgba.data(), 320 * 4);
+            else
+                SDL_UpdateTexture(texture, nullptr, rgb.data(), 320 * 3);
+#else
             SDL_UpdateTexture(texture, nullptr, rgb.data(), 320 * 3);
+#endif
 #ifdef KI_R36S
             const auto gpu_uploaded = timing_gpu ? std::chrono::steady_clock::now()
                                                 : std::chrono::steady_clock::time_point{};
