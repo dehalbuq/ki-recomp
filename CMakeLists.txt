@@ -214,7 +214,7 @@ if(KI_BUILD_FULL)
   target_include_directories(ki_full_code PRIVATE "${FULL_DIR}")
   ki_code_library(ki_full_code)
   if(KI_R36S)
-    target_compile_definitions(ki_full_code PRIVATE KI_R36S_FAST_COP0=1 KI_R36S_FAST_MEMORY=1)
+    target_compile_definitions(ki_full_code PRIVATE KI_R36S_FAST_COP0=1 KI_R36S_FAST_MEMORY=1 KI_R36S_GFX_PROFILE_SUPPORTED=1)
   endif()
   # Debug used -O1 even in Release, which leaves the recompiled guest
   # very slow on RK3326. Enable a conservative -O2 for handheld release builds.
