@@ -30,7 +30,10 @@ case "$MIPS_O3" in
   *) echo "KI_R36S_MIPS_O3 must be ON or OFF, got: $MIPS_O3" >&2; exit 2 ;;
 esac
 args+=("-DKI_R36S_MIPS_O3=$MIPS_O3")
-echo "R36S build: type=${KI_BUILD_TYPE:-Debug}, generated MIPS O3=$MIPS_O3"
+RELEASE_CLEAN="${KI_R36S_RELEASE_CLEAN:-OFF}"
+case "$RELEASE_CLEAN" in ON|OFF) ;; *) echo "KI_R36S_RELEASE_CLEAN must be ON or OFF" >&2; exit 2;; esac
+args+=("-DKI_R36S_RELEASE_CLEAN=$RELEASE_CLEAN")
+echo "R36S build: type=${KI_BUILD_TYPE:-Debug}, generated MIPS O3=$MIPS_O3, clean release=$RELEASE_CLEAN"
 
 
 # Both C and C++ MUST target AArch64. Otherwise libchdr's C objects end
