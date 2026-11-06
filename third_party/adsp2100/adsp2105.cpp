@@ -466,6 +466,43 @@ bool Adsp2105::try_ki_waitloop()
     return true;
 }
 
+bool Adsp2105::guest_state_equals(const Adsp2105& o) const
+{
+    // Compare emulated registers, stacks, flags, timers and cycle counter.
+    // This deliberately excludes host pointers (which differ per instance)
+    // and diagnostic fastpath counters (which should differ).
+    return m_chip_type == o.m_chip_type &&
+        m_pc == o.m_pc && m_ppc == o.m_ppc &&
+        m_loop == o.m_loop && m_loop_condition == o.m_loop_condition &&
+        m_cntr == o.m_cntr && m_astat == o.m_astat &&
+        m_sstat == o.m_sstat && m_mstat == o.m_mstat &&
+        m_mstat_prev == o.m_mstat_prev && m_astat_clear == o.m_astat_clear &&
+        m_idle == o.m_idle &&
+        std::memcmp(&m_core, &o.m_core, sizeof m_core) == 0 &&
+        std::memcmp(&m_alt, &o.m_alt, sizeof m_alt) == 0 &&
+        std::memcmp(m_i, o.m_i, sizeof m_i) == 0 &&
+        std::memcmp(m_m, o.m_m, sizeof m_m) == 0 &&
+        std::memcmp(m_l, o.m_l, sizeof m_l) == 0 &&
+        std::memcmp(m_lmask, o.m_lmask, sizeof m_lmask) == 0 &&
+        std::memcmp(m_base, o.m_base, sizeof m_base) == 0 &&
+        m_px == o.m_px && m_pmovlay == o.m_pmovlay &&
+        m_dmovlay == o.m_dmovlay &&
+        std::memcmp(m_loop_stack, o.m_loop_stack, sizeof m_loop_stack) == 0 &&
+        std::memcmp(m_cntr_stack, o.m_cntr_stack, sizeof m_cntr_stack) == 0 &&
+        std::memcmp(m_pc_stack, o.m_pc_stack, sizeof m_pc_stack) == 0 &&
+        std::memcmp(m_stat_stack, o.m_stat_stack, sizeof m_stat_stack) == 0 &&
+        m_pc_sp == o.m_pc_sp && m_cntr_sp == o.m_cntr_sp &&
+        m_stat_sp == o.m_stat_sp && m_loop_sp == o.m_loop_sp &&
+        m_flagout == o.m_flagout && m_flagin == o.m_flagin &&
+        m_fl0 == o.m_fl0 && m_fl1 == o.m_fl1 && m_fl2 == o.m_fl2 &&
+        m_imask == o.m_imask && m_icntl == o.m_icntl &&
+        m_ifc == o.m_ifc &&
+        std::memcmp(m_irq_state, o.m_irq_state, sizeof m_irq_state) == 0 &&
+        std::memcmp(m_irq_latch, o.m_irq_latch, sizeof m_irq_latch) == 0 &&
+        m_icount == o.m_icount && m_in_reset == o.m_in_reset &&
+        m_total_cycles == o.m_total_cycles;
+}
+
 // Experimental, ahead-of-time specialization of selected ADSP-2105
 // instruction families. The C++ compiler sees each 24-bit instruction as a
 // constant and can eliminate its opcode decode. These operations intentionally
