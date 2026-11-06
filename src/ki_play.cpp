@@ -246,10 +246,33 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "[r36s] BENCHMARK: draw 1 in 4 guest frames (diagnosis only; not default)\n");
 #endif
 #endif
+#ifdef KI_R36S
+    if (std::getenv("KI_R36S_VIDEO_DIAG")) {
+        SDL_LogSetAllPriority(SDL_LOG_PRIORITY_VERBOSE);
+        std::fprintf(stderr, "[r36s] SDL2 video diagnostics enabled\n");
+    }
+#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
+#ifdef KI_R36S
+    {
+        SDL_version runtime_sdl{};
+        SDL_GetVersion(&runtime_sdl);
+        std::fprintf(stderr, "[r36s] SDL2 runtime=%u.%u.%u video_driver=%s displays=%d EGL_FORCE=%s\n",
+            runtime_sdl.major, runtime_sdl.minor, runtime_sdl.patch,
+            SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "<none>",
+            SDL_GetNumVideoDisplays(),
+            std::getenv("SDL_VIDEO_FORCE_EGL") ? std::getenv("SDL_VIDEO_FORCE_EGL") : "<unset>");
+        for (int idx=0; idx<SDL_GetNumVideoDisplays(); ++idx) {
+            SDL_Rect disp{};
+            if (SDL_GetDisplayBounds(idx, &disp)==0)
+                std::fprintf(stderr, "[r36s] SDL2 display[%d]=%dx%d at %d,%d\n",
+                    idx, disp.w, disp.h, disp.x, disp.y);
+        }
+    }
+#endif
     Uint32 window_flags = SDL_WINDOW_RESIZABLE;
 #ifdef KI_R36S
     window_flags = SDL_WINDOW_FULLSCREEN_DESKTOP;
@@ -258,6 +281,12 @@ int main(int argc, char** argv) {
                                           240 * scale, window_flags);
     if (!window) {
         std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
+#ifdef KI_R36S
+        std::fprintf(stderr, "[r36s] WINDOW_FAIL driver=%s renderer_hint=%s surface_hint=%s\n",
+            SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "<none>",
+            std::getenv("SDL_RENDER_DRIVER") ? std::getenv("SDL_RENDER_DRIVER") : "<auto>",
+            std::getenv("SDL_VIDEO_FORCE_EGL") ? std::getenv("SDL_VIDEO_FORCE_EGL") : "<unset>");
+#endif
         SDL_Quit();
         return 1;
     }
@@ -275,7 +304,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 #ifdef KI_R36S
-#if SDL_VERSION_ATLEAST(2, 0, 18)
+#if SDL_VERSION_ATLEAST(2, 0, 18) && !defined(KI_R36S_LEGACY_SDL_ABI)
     if (SDL_RenderSetVSync(renderer, 0) != 0)
         std::fprintf(stderr, "[r36s] WARNING: SDL_RenderSetVSync(0): %s\n", SDL_GetError());
 #endif
@@ -303,7 +332,9 @@ int main(int argc, char** argv) {
     };
     set_aspect(wide);
     SDL_Texture* ambient = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 40, 30);
+#if !defined(KI_R36S_LEGACY_SDL_ABI)
     SDL_SetTextureScaleMode(ambient, SDL_ScaleModeLinear);
+#endif
 #ifdef KI_R36S
     const Uint32 frame_texture_format = r36s_fast_rgba ?
         SDL_PIXELFORMAT_ABGR8888 : SDL_PIXELFORMAT_RGB24;
@@ -330,7 +361,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 #ifdef KI_R36S
+#ifndef KI_R36S_LEGACY_SDL_ABI
     SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
+#endif
     if (r36s_direct_texture && !r36s_fast_rgba) {
         std::fprintf(stderr,
             "[r36s] TEST19: locked texture requires RGBA; using baseline SDL_UpdateTexture\n");
