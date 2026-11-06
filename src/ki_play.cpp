@@ -54,6 +54,7 @@
 #include "ki_pad_ui.h"
 #ifdef KI_R36S
 #include "ki_r36s_menu.h"
+#include "ki_r36s_intro.h"
 #include "ki_r36s_host_profiler.h"
 #include "ki_r36s_gfx_profiler.h"
 #include "ki_r36s_audio_smooth.h"
@@ -349,6 +350,21 @@ int main(int argc, char** argv) {
 #endif
 #endif
     SDL_Texture* hd_texture = nullptr;  // 4x picture when an HD pack is loaded (H toggles)
+
+    // ---- R36S independent-port attribution and legal notice ----
+    // Displayed before opening any commercial game data. The renderer
+    // continues at 320x240/nearest afterwards. The entire intro module
+    // is dormant during gameplay, with no persistent textures/timers.
+#ifdef KI_R36S
+    if (!ki_r36s::intro::show(renderer)) {
+        SDL_DestroyTexture(texture);
+        SDL_DestroyTexture(ambient);
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 0;
+    }
+#endif
 
     // ---- the game's files ----
 #ifdef KI_R36S
