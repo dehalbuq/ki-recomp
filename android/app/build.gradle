@@ -9,8 +9,8 @@ android {
         applicationId 'br.com.dehalbuq.kiandroid'
         minSdk 19
         targetSdk 28
-        versionCode 1
-        versionName '0.1-armv7-test'
+        versionCode 2
+        versionName '0.2-armv7-audio-test'
         ndk { abiFilters 'armeabi-v7a' }
         externalNativeBuild {
             cmake {
