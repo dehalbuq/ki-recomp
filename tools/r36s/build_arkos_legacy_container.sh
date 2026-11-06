@@ -56,6 +56,7 @@ export PKG_CONFIG_PATH="/opt/ki-sdl2/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 # handheld direct-screen rendering. Build with dynamic GBM/DRM loading.
 cmake -S "build-arkos-deps/SDL2-${SDL_VERSION}" -B build-arkos-deps/sdl-build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/ki-sdl2 \
+  -DCMAKE_INSTALL_LIBDIR=lib \
   -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST=OFF \
   -DSDL_KMSDRM=ON -DSDL_OPENGLES=ON -DSDL_ALSA=ON \
   -DSDL_X11=ON -DSDL_WAYLAND=OFF
