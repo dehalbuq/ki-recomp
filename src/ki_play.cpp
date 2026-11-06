@@ -56,6 +56,7 @@
 #include "ki_r36s_menu.h"
 #include "ki_r36s_host_profiler.h"
 #include "ki_r36s_gfx_profiler.h"
+#include "ki_r36s_audio_smooth.h"
 #endif
 #ifdef KI_HAVE_FILES
 #include "ki_files.h"
@@ -196,6 +197,9 @@ int main(int argc, char** argv) {
     SDL_SetHintWithPriority(SDL_HINT_RENDER_VSYNC, "0", SDL_HINT_OVERRIDE);
     const bool r36s_bench_no_dcs = std::getenv("KI_R36S_BENCH_NO_DCS") != nullptr;
     const bool r36s_audio_trace = std::getenv("KI_R36S_AUDIO_TRACE") != nullptr;
+    const bool r36s_audio_smooth = std::getenv("KI_R36S_AUDIO_SMOOTH") != nullptr;
+    std::fprintf(stderr, "[r36s] pitch-preserving adaptive audio: %s\n",
+                 r36s_audio_smooth ? "ON (experimental WSOLA)" : "OFF (original DSP output)");
     const bool r36s_dsp_hotspots = std::getenv("KI_R36S_DSP_HOTSPOTS") != nullptr;
     const bool r36s_time_dsp = std::getenv("KI_R36S_TIME_DSP") != nullptr;
     const bool r36s_host_profile = std::getenv("KI_R36S_HOST_PROFILE") != nullptr;
@@ -405,6 +409,12 @@ int main(int argc, char** argv) {
     if (cold) board.set_cycles_to_vblank(0);
     static std::unique_ptr<ki::Dcs> dcs;
     SDL_AudioDeviceID audio = 0;
+#ifdef KI_R36S
+    ki_r36s::AudioSmooth audio_smoother;
+    bool r36s_audio_primed = false;
+    bool r36s_audio_clock_valid = false;
+    std::chrono::steady_clock::time_point r36s_audio_last_vblank;
+#endif
     if (!sound.empty()
 #ifdef KI_R36S
         && !r36s_bench_no_dcs
@@ -424,7 +434,21 @@ int main(int argc, char** argv) {
             want.samples = 1024;
             audio = SDL_OpenAudioDevice(nullptr, 0, &want, nullptr, 0);
             if (!audio) std::fprintf(stderr, "no audio: %s\n", SDL_GetError());
-            else SDL_PauseAudioDevice(audio, 0);
+            else {
+#ifdef KI_R36S
+                if (r36s_audio_smooth) {
+                    // Keep device paused until ~90ms of ORIGINAL game audio
+                    // (after pitch-preserving time stretching) has accumulated.
+                    // Startup padding with silence is avoided.
+                    SDL_PauseAudioDevice(audio, 1);
+                    std::fprintf(stderr,
+                        "[r36s] AUDIO_SMOOTH sink=%dHz S16 mono, priming=%ums target=%ums\n",
+                        want.freq, ki_r36s::AudioSmooth::kStartQueueMs,
+                        ki_r36s::AudioSmooth::kTargetQueueMs);
+                } else
+#endif
+                SDL_PauseAudioDevice(audio, 0);
+            }
         }
     }
 
@@ -725,7 +749,17 @@ int main(int argc, char** argv) {
                         if (action == 1) r36s_menu_choice = 1;
                         if (action == 3 || (action == 2 && r36s_menu_choice == 0)) {
                             r36s_menu_open = false;
-                            if (audio && !paused) SDL_PauseAudioDevice(audio, 0);
+                            if (audio && !paused) {
+                                if (r36s_audio_smooth) {
+                                    // Never play stale pre-menu audio at resume.
+                                    SDL_ClearQueuedAudio(audio);
+                                    audio_smoother.reset();
+                                    r36s_audio_primed = false;
+                                    r36s_audio_clock_valid = false;
+                                } else {
+                                    SDL_PauseAudioDevice(audio, 0);
+                                }
+                            }
                             std::fprintf(stderr, "[r36s] resume game\n");
                         } else if (action == 2 && r36s_menu_choice == 1) {
                             std::fprintf(stderr, "[r36s] exit selected; flushing save\n");
@@ -796,7 +830,20 @@ int main(int argc, char** argv) {
                 if (ev.type == SDL_KEYDOWN && !ev.key.repeat && ev.key.keysym.scancode == SDL_SCANCODE_V) set_aspect(!wide);
                 if (ev.type == SDL_KEYDOWN && !ev.key.repeat && ev.key.keysym.scancode == SDL_SCANCODE_P) {
                     paused = !paused;
-                    if (audio) SDL_PauseAudioDevice(audio, paused ? 1 : 0);
+                    if (audio) {
+#ifdef KI_R36S
+                        if (r36s_audio_smooth) {
+                            if (paused) {
+                                SDL_PauseAudioDevice(audio, 1);
+                                SDL_ClearQueuedAudio(audio);
+                                audio_smoother.reset();
+                                r36s_audio_primed = false;
+                                r36s_audio_clock_valid = false;
+                            } // resume remains paused until the buffer primes
+                        } else
+#endif
+                        SDL_PauseAudioDevice(audio, paused ? 1 : 0);
+                    }
                     SDL_SetWindowTitle(window, paused ? "Killer Instinct (recompiled): paused (P resumes)" : kTitle);
                 }
 #ifdef KI_HAVE_HD
