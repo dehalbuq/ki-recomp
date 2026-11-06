@@ -16,7 +16,13 @@ if [ ! -x "$PYTHON_BIN" ]; then
   exit 2
 fi
 
-args=(-S "$ROOT" -B "$ROOT/build-r36s" -G Ninja
+BUILD_FOLDER="${KI_R36S_BUILD_DIR:-build-r36s}"
+if [[ ! "$BUILD_FOLDER" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "KI_R36S_BUILD_DIR must be a simple local folder name" >&2
+  exit 2
+fi
+BUILD_DIR="$ROOT/$BUILD_FOLDER"
+args=(-S "$ROOT" -B "$BUILD_DIR" -G Ninja
   "-DCMAKE_BUILD_TYPE=${KI_BUILD_TYPE:-Debug}"
   -DKI_R36S=ON -DKI_BUILD_FULL=ON -DKI_BUILD_TRACE=OFF -DKI_WITH_CHD=ON
   -DKI_SPLIT=32 "-DKI_PYTHON=$PYTHON_BIN")
@@ -33,7 +39,7 @@ args+=("-DKI_R36S_MIPS_O3=$MIPS_O3")
 RELEASE_CLEAN="${KI_R36S_RELEASE_CLEAN:-OFF}"
 case "$RELEASE_CLEAN" in ON|OFF) ;; *) echo "KI_R36S_RELEASE_CLEAN must be ON or OFF" >&2; exit 2;; esac
 args+=("-DKI_R36S_RELEASE_CLEAN=$RELEASE_CLEAN")
-echo "R36S build: type=${KI_BUILD_TYPE:-Debug}, generated MIPS O3=$MIPS_O3, clean release=$RELEASE_CLEAN"
+echo "R36S build: folder=$BUILD_FOLDER, type=${KI_BUILD_TYPE:-Debug}, generated MIPS O3=$MIPS_O3, clean release=$RELEASE_CLEAN"
 
 
 # Both C and C++ MUST target AArch64. Otherwise libchdr's C objects end
@@ -61,12 +67,18 @@ done
 CC_PATH="$(command -v "$CC_TARGET")"
 CXX_PATH="$(command -v "$CXX_TARGET")"
 args+=("-DCMAKE_C_COMPILER=$CC_PATH" "-DCMAKE_CXX_COMPILER=$CXX_PATH")
+if [ -n "${KI_R36S_CMAKE_PREFIX_PATH:-}" ]; then
+  args+=("-DCMAKE_PREFIX_PATH=$KI_R36S_CMAKE_PREFIX_PATH")
+fi
+if [ "${KI_R36S_SKIP_BUILD_RPATH:-0}" = 1 ]; then
+  args+=("-DCMAKE_SKIP_BUILD_RPATH=ON")
+fi
 echo "Using C compiler: $CC_PATH ($("$CC_TARGET" -dumpmachine))"
 echo "Using C++ compiler: $CXX_PATH ($("$CXX_TARGET" -dumpmachine))"
 
 # CMake cannot safely switch compilers in an existing build tree. Detect the
 # first (broken) x86_64 CMake cache rather than repeatedly failing at link.
-CACHE="$ROOT/build-r36s/CMakeCache.txt"
+CACHE="$BUILD_DIR/CMakeCache.txt"
 if [ -f "$CACHE" ]; then
   for kind in C CXX; do
     key="CMAKE_${kind}_COMPILER"
@@ -75,7 +87,7 @@ if [ -f "$CACHE" ]; then
     if [ -n "$cached" ] && [ "$(readlink -f "$cached")" != "$(readlink -f "$desired")" ]; then
       echo "Incompatible existing CMake cache: $key=$cached" >&2
       echo "Expected: $desired" >&2
-      echo "Fix (only removes generated objects): rm -rf build-r36s" >&2
+      echo "Fix (only removes generated objects): rm -rf $BUILD_FOLDER" >&2
       echo "Then run: bash tools/r36s/build.sh" >&2
       exit 3
     fi
@@ -90,12 +102,12 @@ elif [ "$(uname -m)" != "aarch64" ]; then
 fi
 
 cmake "${args[@]}"
-cmake --build "$ROOT/build-r36s" --target ki_play --parallel "${KI_JOBS:-2}"
-file "$ROOT/build-r36s/ki_play"
+cmake --build "$BUILD_DIR" --target ki_play --parallel "${KI_JOBS:-2}"
+file "$BUILD_DIR/ki_play"
 if command -v readelf >/dev/null 2>&1; then
   echo "--- Dynamic libraries ---"
-  readelf -d "$ROOT/build-r36s/ki_play" | grep NEEDED || true
+  readelf -d "$BUILD_DIR/ki_play" | grep NEEDED || true
   echo "--- Highest GLIBC symbol versions ---"
-  readelf --version-info "$ROOT/build-r36s/ki_play" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -Vu | tail -8 || true
+  readelf --version-info "$BUILD_DIR/ki_play" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -Vu | tail -8 || true
 fi
 echo "Full binary compiled, NOT YET validated on R36S hardware."
