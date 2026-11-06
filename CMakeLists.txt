@@ -168,7 +168,7 @@ if(KI_R36S AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_test(NAME audio_smooth_selftest COMMAND audio_smooth_selftest)
   # Building the graphics test suite must also materialize the newer
   # GLES2 RGB555/RGBA differential test before ctest --test-dir.
-  add_dependencies(gfx_profile_selftest gles2_rgba_upload_selftest)
+  add_dependencies(gfx_profile_selftest gles2_rgba_upload_selftest audio_smooth_selftest)
 endif()
 file(GLOB _cases LIST_DIRECTORIES true "${CMAKE_SOURCE_DIR}/traces/poc/*")
 foreach(case_dir IN LISTS _cases)
