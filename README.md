@@ -16,7 +16,7 @@
 | Item | State |
 |---|---|
 | Real hardware | **Tested:** RK3326 Cortex-A35 handheld running **dArkOSRE** at 640×480, 4:3 |
-| Other firmware variants | **Unverified** for this KI build; libc/SDL/Mali ABI requirements differ |
+| Other firmware variants | **ArkOS4Clone legacy binary is being built and audited** (glibc 2.28 base); runtime still unverified on actual hardware |
 | Video | OpenGL ES 2 hardware-accelerated output; 320×240 guest RGB555 to RGBA8888 with ARM NEON, pixel-perfect 2× |
 | Game runtime | Static recompiled MIPS R4600 C++/AArch64, original game clock (~58.98 Hz), no MAME/DOSBox |
 | Sound | Emulated ADSP-2105 DSP plus experimental pitch-preserving WSOLA playback |
@@ -47,6 +47,25 @@ the original game into a real-time 3D GPU renderer.
 [Full measurements, sources and remaining work](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/docs/R36S_PROGRESS.md).
 
 </details>
+
+
+### Dual-firmware ARM64 support (in development)
+
+The PortMaster launcher automatically checks the firmware's GLIBC
+at startup and selects the correct AArch64 executable, never replacing
+firmware system libraries:
+
+| Host glibc | Launches | Platform target |
+|---|---|---|
+| 2.38+ | `ki_play.aarch64` | dArkOSRE (modern) |
+| 2.28–2.37 | `ki_play.glibc230.aarch64` + `libs.glibc230/` | ArkOS4Clone/older Linux ARM64 |
+| below 2.28 or unknown | Safe error | Unsupported |
+
+The old-ABI binary is compiled separately inside a GLIBC 2.28
+container with its own SDL2, libstdc++ and libgcc_s libraries.
+**Build/ABI validation does not guarantee game launch or controls
+on ArkOS4Clone:** a real firmware test is required before claiming
+compatibility. [Dual build instructions](https://github.com/dehalbuq/ki-recomp/blob/port/r36s-portmaster/docs/R36S_PORT.md).
 
 ## Installing on a compatible R36S (personal testing)
 
