@@ -452,6 +452,7 @@ int main(int argc, char** argv) {
     uint64_t r36s_audio_hash = 14695981039346656037ull; // FNV-1a 64-bit offset basis
     unsigned r36s_present_frames = 0;
     uint64_t r36s_waitloop_last = 0;
+    uint64_t r36s_native_opcode_last = 0;
     double r36s_render_ms = 0, r36s_rgb_ms = 0, r36s_swap_ms = 0;
     auto r36s_cpu_begin = std::clock();
     auto r36s_proc_read_bytes = []() -> unsigned long long {
@@ -848,6 +849,16 @@ int main(int argc, char** argv) {
                         accelerated - r36s_waitloop_last : 0ull),
                     static_cast<unsigned long long>(accelerated));
                 r36s_waitloop_last = accelerated;
+                if (std::getenv("KI_R36S_DSP_COMPILED")) {
+                    const uint64_t native = dcs->native_opcode_count();
+                    std::fprintf(stderr,
+                        "[r36s] ADSP_NATIVE ops=%llu total=%llu (current 5s window)\n",
+                        static_cast<unsigned long long>(
+                            native >= r36s_native_opcode_last ?
+                            native - r36s_native_opcode_last : 0ull),
+                        static_cast<unsigned long long>(native));
+                    r36s_native_opcode_last = native;
+                }
             }
             r36s_cpu_begin = cpu_now;
             r36s_read_begin = reads_now;
