@@ -7,6 +7,13 @@ set +u
 set -o pipefail
 PORTS="$(cd "$(dirname "$0")" && pwd)"
 GAMEDIR="$PORTS/killerinstinct"
+# Test20 default settings chosen from real Test19 dArkOSRE logs:
+# lowest GPU upload time is NEON+SDL_UpdateTexture (not texture lock).
+# Audio smoothing was preferred on real RK3326 hardware. No skipped frames.
+export KI_R36S_GLES2_RGBA=1
+export KI_R36S_AUDIO_SMOOTH=1
+# Obsolete Test19 candidates must never leak into the optimized default.
+unset KI_R36S_DIRECT_TEXTURE KI_R36S_RGBA_SCALAR KI_R36S_NO_CLEAR
 BIN="$GAMEDIR/${KI_R36S_BINARY:-ki_play.aarch64}"
 mkdir -p "$GAMEDIR/logs" "$GAMEDIR/conf"
 LOG="$GAMEDIR/logs/${KI_R36S_LOG_BASENAME:-ki-r36s}.log"
