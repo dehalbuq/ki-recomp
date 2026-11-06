@@ -115,3 +115,40 @@ compatible until boot, gameplay, sound and save behavior have been
 verified on real hardware. Redistribution of the executable requires
 separate rights review because the recompiled binary can contain
 game-derived copyrighted code.
+
+## ArkOS4Clone troubleshooting — SDL2 GBM/EGL window failure
+
+One ArkOS4Clone log (kernel 4.4.189, AArch64, glibc 2.30) proved
+that the ABI selector correctly chose `ki_play.glibc230.aarch64`.
+The actual failure occurred **before the game files were opened**:
+
+```text
+SDL_CreateWindow failed: Can't window GBM/EGL surfaces on window creation.
+```
+
+This is **not** a MIPS/recompiler crash or a reason to update the
+firmware's glibc. It is SDL2/KMSDRM's EGL/GBM window negotiation.
+SDL2 2.30.12's original KMSDRM backend hardcodes ARGB8888, which
+not all Mali GBM/EGL implementations support. The experimental
+correction:
+- Compiles the legacy SDL2 with a localized retry across
+  XRGB8888, ARGB8888 and RGB565 visual/scanout formats.
+- Starts the *legacy* launcher with `SDL_VIDEODRIVER=kmsdrm`,
+  `SDL_VIDEO_FORCE_EGL=1` and `SDL_RENDER_DRIVER=opengles2`
+  unless the firmware/user already specifies a driver.
+- Reports SDL2 version, selected backend and the reason each GBM
+  format failed to `killerinstinct/logs/ki-r36s.log`.
+- On this specific pre-game window failure, automatically retries
+  once with the firmware's own SDL2, while keeping old-ABI C++
+  libraries and without touching GPU/EGL/GLIBC system files.
+- Avoids newer SDL_RenderSetVSync/SDL_SetTextureScaleMode symbol
+  imports from the legacy game executable so older firmware SDL2
+  is a feasible fallback.
+
+This is an **experimental firmware compatibility fix**, not evidence
+that it is already working on ArkOS4Clone hardware. Never install
+new `libEGL.so`, `libgbm.so`, `libmali.so` or libc files into
+the handheld root filesystem to fix this error. If a new launch still
+fails, provide both `ki-r36s.log` and
+`ki-r36s-legacy-video-attempt.log` from the game's logs directory.
+The latter records the exact surface failure in the first attempt.
