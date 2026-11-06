@@ -126,6 +126,12 @@ add_executable(dsp_waitloop_selftest tests/dsp_waitloop_selftest.cpp)
 target_link_libraries(dsp_waitloop_selftest PRIVATE adsp2105)
 add_test(NAME dsp_waitloop_selftest COMMAND dsp_waitloop_selftest)
 
+if(KI_R36S)
+  add_executable(adsp_native_selftest tests/adsp_native_selftest.cpp)
+  target_link_libraries(adsp_native_selftest PRIVATE adsp2105)
+  add_test(NAME adsp_native_selftest COMMAND adsp_native_selftest)
+endif()
+
 add_executable(kinst_vblank_fast_selftest tests/kinst_vblank_fast_selftest.cpp)
 target_link_libraries(kinst_vblank_fast_selftest PRIVATE ki_runtime)
 add_test(NAME kinst_vblank_fast_selftest COMMAND kinst_vblank_fast_selftest)
