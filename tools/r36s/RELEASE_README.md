@@ -6,7 +6,13 @@ by [dehalbuq](https://github.com/dehalbuq). Source:
 https://github.com/dehalbuq/ki-recomp/tree/port/r36s-portmaster
 
 **Requirements:** AArch64 handheld running a compatible PortMaster
-firmware (tested on dArkOSRE/RK3326; other firmwares not yet confirmed).
+firmware. The dual-binary package automatically selects a modern
+`ki_play.aarch64` for glibc >=2.38 (dArkOSRE) or a separate
+`ki_play.glibc230.aarch64` with `libs.glibc230/` for glibc 2.28–2.37
+(ArkOS4Clone and older variants). The former is based on the tested
+dArkOSRE code; the latter is built against glibc 2.28 for **new
+hardware testing**, not yet confirmed working on ArkOS4Clone.
+Never overwrite the firmware glibc, EGL or Mali libraries.
 Use 640x480 4:3, native GLES2, nearest-neighbor exact 2x pixels.
 
 **Install:** Extract this ZIP directly into the SD card's
