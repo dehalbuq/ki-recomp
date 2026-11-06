@@ -367,28 +367,28 @@ class Translator:
         if n == "mthi": return f"c.hi = {rs};"
         if n == "mtlo": return f"c.lo = {rs};"
         # loads (performed even when rt == $zero: I/O reads can have side effects)
-        loads = {"lb": "ki::sx8(ki::load<uint8_t>(c, {a}, {pc}))",
-                 "lbu": "uint64_t(ki::load<uint8_t>(c, {a}, {pc}))",
-                 "lh": "ki::sx16(ki::load<uint16_t>(c, {a}, {pc}))",
-                 "lhu": "uint64_t(ki::load<uint16_t>(c, {a}, {pc}))",
-                 "lw": "ki::sx32(ki::load<uint32_t>(c, {a}, {pc}))",
-                 "ll": "ki::sx32(ki::load<uint32_t>(c, {a}, {pc}))",
-                 "lwu": "uint64_t(ki::load<uint32_t>(c, {a}, {pc}))",
-                 "ld": "ki::load<uint64_t>(c, {a}, {pc})",
-                 "lld": "ki::load<uint64_t>(c, {a}, {pc})",
-                 "lwl": "ki::lwl(c, {rt}, {a}, {pc})", "lwr": "ki::lwr(c, {rt}, {a}, {pc})",
-                 "ldl": "ki::ldl(c, {rt}, {a}, {pc})", "ldr": "ki::ldr(c, {rt}, {a}, {pc})"}
+        loads = {"lb": "ki::sx8(ki::load_recompiled<uint8_t>(c, {a}, {pc}))",
+                 "lbu": "uint64_t(ki::load_recompiled<uint8_t>(c, {a}, {pc}))",
+                 "lh": "ki::sx16(ki::load_recompiled<uint16_t>(c, {a}, {pc}))",
+                 "lhu": "uint64_t(ki::load_recompiled<uint16_t>(c, {a}, {pc}))",
+                 "lw": "ki::sx32(ki::load_recompiled<uint32_t>(c, {a}, {pc}))",
+                 "ll": "ki::sx32(ki::load_recompiled<uint32_t>(c, {a}, {pc}))",
+                 "lwu": "uint64_t(ki::load_recompiled<uint32_t>(c, {a}, {pc}))",
+                 "ld": "ki::load_recompiled<uint64_t>(c, {a}, {pc})",
+                 "lld": "ki::load_recompiled<uint64_t>(c, {a}, {pc})",
+                 "lwl": "ki::lwl_recompiled(c, {rt}, {a}, {pc})", "lwr": "ki::lwr_recompiled(c, {rt}, {a}, {pc})",
+                 "ldl": "ki::ldl_recompiled(c, {rt}, {a}, {pc})", "ldr": "ki::ldr_recompiled(c, {rt}, {a}, {pc})"}
         if n in loads:
             return a(i.rt, loads[n].format(a=addr, pc=pc, rt=rt))
         stores = {"sb": "uint8_t", "sh": "uint16_t", "sw": "uint32_t", "sd": "uint64_t"}
         if n in stores:
             t = stores[n]
-            return f"ki::store<{t}>(c, {addr}, static_cast<{t}>({rt}), {pc});"
+            return f"ki::store_recompiled<{t}>(c, {addr}, static_cast<{t}>({rt}), {pc});"
         if n in ("swl", "swr", "sdl", "sdr"):
             return f"ki::{n}(c, {rt}, {addr}, {pc});"
         if n in ("sc", "scd"):  # single CPU, no LL/SC contention modelled
             t = "uint32_t" if n == "sc" else "uint64_t"
-            return f"ki::store<{t}>(c, {addr}, static_cast<{t}>({rt}), {pc}); " + a(i.rt, "1ull")
+            return f"ki::store_recompiled<{t}>(c, {addr}, static_cast<{t}>({rt}), {pc}); " + a(i.rt, "1ull")
         # traps
         traps = {"teq": "{rs} == {rt}", "tne": "{rs} != {rt}", "tge": "ki::s64({rs}) >= ki::s64({rt})",
                  "tgeu": "{rs} >= {rt}", "tlt": "ki::s64({rs}) < ki::s64({rt})", "tltu": "{rs} < {rt}",
@@ -421,10 +421,10 @@ class Translator:
         """COP1, single precision and moves (Status.FR = 1). None if not FPU."""
         n, ft, fs, fd, rt = i.name, i.ft, i.fs, i.fd, R(i.rt)
         S = lambda r: f"ki::fs(c, {r})"  # noqa: E731
-        if n == "lwc1": return f"ki::set_fbits(c, {ft}, ki::load<uint32_t>(c, {addr}, {pc}));"
-        if n == "swc1": return f"ki::store<uint32_t>(c, {addr}, ki::fbits(c, {ft}), {pc});"
-        if n == "ldc1": return f"c.f[{ft}] = ki::load<uint64_t>(c, {addr}, {pc});"
-        if n == "sdc1": return f"ki::store<uint64_t>(c, {addr}, c.f[{ft}], {pc});"
+        if n == "lwc1": return f"ki::set_fbits(c, {ft}, ki::load_recompiled<uint32_t>(c, {addr}, {pc}));"
+        if n == "swc1": return f"ki::store_recompiled<uint32_t>(c, {addr}, ki::fbits(c, {ft}), {pc});"
+        if n == "ldc1": return f"c.f[{ft}] = ki::load_recompiled<uint64_t>(c, {addr}, {pc});"
+        if n == "sdc1": return f"ki::store_recompiled<uint64_t>(c, {addr}, c.f[{ft}], {pc});"
         if n == "mtc1": return f"ki::set_fbits(c, {fs}, ki::lo32({rt}));"
         if n == "mfc1": return self.assign(i.rt, f"ki::sx32(ki::fbits(c, {fs}))")
         if n == "dmtc1": return f"c.f[{fs}] = {rt};"
