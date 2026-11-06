@@ -371,6 +371,9 @@ int main(int argc, char** argv) {
     c.fast_mips_idle = std::getenv("KI_R36S_MIPS_IDLE") != nullptr;
     std::fprintf(stderr, "[r36s] MIPS event-driven idle accelerator: %s\n",
                  c.fast_mips_idle ? "ON (experimental)" : "OFF");
+    c.fast_mips_memory = std::getenv("KI_R36S_MEM_BASELINE") == nullptr;
+    std::fprintf(stderr, "[r36s] MIPS physical RAM fastpath: %s\n",
+                 c.fast_mips_memory ? "ON" : "OFF (baseline)");
 #endif
     static ki::KinstBoard board(std::move(disk_image), std::move(boot_rom));
     c.io = &board;
