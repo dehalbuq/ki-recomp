@@ -64,9 +64,8 @@ cmake --build build-arkos-deps/sdl-build --parallel 2
 cmake --install build-arkos-deps/sdl-build
 test -f /opt/ki-sdl2/include/SDL2/SDL.h
 test -e /opt/ki-sdl2/lib/libSDL2-2.0.so.0
-grep -R -q '^#define SDL_VIDEO_DRIVER_KMSDRM 1' \
-  build-arkos-deps/sdl-build/include/SDL_config.h \
-  build-arkos-deps/sdl-build/SDL_config.h 2>/dev/null || {
+grep -E -q '^#define SDL_VIDEO_DRIVER_KMSDRM 1' \
+  /opt/ki-sdl2/include/SDL2/SDL_config.h || {
     echo "ERROR: legacy SDL2 was built without KMSDRM support!" >&2
     exit 11
   }
