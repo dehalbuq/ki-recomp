@@ -943,6 +943,22 @@ int main(int argc, char** argv) {
             if (r36s_host_profile)
                 ki_r36s::host_profiler::report(r36s_sample_frames);
             ki_r36s::gfx_profiler::report(r36s_sample_frames);
+            if (r36s_audio_smooth && audio) {
+                const auto stats = audio_smoother.take_stats();
+                std::fprintf(stderr,
+                    "[r36s] AUDIO_SMOOTH frames=%llu in=%llu out=%llu "
+                    "stretch=%.3f queue_min_ms=%u queue_max_ms=%u under20=%llu "
+                    "primed=%d sdl_queue_ms=%u\n",
+                    static_cast<unsigned long long>(stats.frames),
+                    static_cast<unsigned long long>(stats.input_samples),
+                    static_cast<unsigned long long>(stats.output_samples),
+                    stats.stretch,
+                    stats.min_queue_ms == 0xffffffffu ? 0u : stats.min_queue_ms,
+                    stats.max_queue_ms,
+                    static_cast<unsigned long long>(stats.low_queue_frames),
+                    r36s_audio_primed ? 1 : 0,
+                    SDL_GetQueuedAudioSize(audio) / (ki_r36s::AudioSmooth::kRate * 2u / 1000u));
+            }
             if (ki_r36s::gfx_profiler::enabled()) {
                 std::fprintf(stderr,
                     "[r36s] GFX_SDL_ES2 upload_ms_per_frame=%.3f copy_submit_ms_per_frame=%.3f "
@@ -1034,9 +1050,43 @@ int main(int argc, char** argv) {
                 }
             }
 #endif
-            // Drop audio in turbo mode, or if the queue backs up past 200 ms.
-            if (audio && !turbo && SDL_GetQueuedAudioSize(audio) < 31250 * 2 / 5)
-                SDL_QueueAudio(audio, pcm.data(), static_cast<Uint32>(pcm.size() * sizeof(int16_t)));
+#ifdef KI_R36S
+            if (audio && !turbo && r36s_audio_smooth) {
+                const auto now_audio = std::chrono::steady_clock::now();
+                const double dt = r36s_audio_clock_valid
+                    ? std::chrono::duration<double>(now_audio - r36s_audio_last_vblank).count()
+                    : (1.0 / 58.98);
+                r36s_audio_last_vblank = now_audio;
+                r36s_audio_clock_valid = true;
+                const Uint32 before = SDL_GetQueuedAudioSize(audio);
+                const auto& stretched = audio_smoother.process(pcm, dt, before);
+                constexpr Uint32 max_bytes = ki_r36s::AudioSmooth::kRate * 2u *
+                    ki_r36s::AudioSmooth::kMaxQueueMs / 1000u;
+                if (!paused && before < max_bytes && !stretched.empty()) {
+                    if (SDL_QueueAudio(audio, stretched.data(),
+                                       static_cast<Uint32>(stretched.size() * sizeof(int16_t))) != 0)
+                        std::fprintf(stderr, "[r36s] AUDIO_SMOOTH SDL_QueueAudio error: %s\n",
+                                     SDL_GetError());
+                }
+                if (!r36s_audio_primed && !paused &&
+                    SDL_GetQueuedAudioSize(audio) >=
+                        ki_r36s::AudioSmooth::kRate * 2u *
+                        ki_r36s::AudioSmooth::kStartQueueMs / 1000u) {
+                    SDL_PauseAudioDevice(audio, 0);
+                    r36s_audio_primed = true;
+                    std::fprintf(stderr,
+                        "[r36s] AUDIO_SMOOTH primed: SDL playback active, delay approximately %u ms\n",
+                        ki_r36s::AudioSmooth::kStartQueueMs);
+                }
+            } else
+#endif
+            {
+                // Reference path: exact DSP PCM, no adaptive host stretching.
+                // Drop audio in turbo mode, or if the queue exceeds 200 ms.
+                if (audio && !turbo && SDL_GetQueuedAudioSize(audio) < 31250 * 2 / 5)
+                    SDL_QueueAudio(audio, pcm.data(),
+                                   static_cast<Uint32>(pcm.size() * sizeof(int16_t)));
+            }
             pcm.clear();
         }
 #ifdef KI_R36S
@@ -1048,8 +1098,17 @@ int main(int argc, char** argv) {
         if (!turbo) {
             next_frame += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 std::chrono::duration<double>(kFrameSeconds));
-            // Follow the audio clock: when more than ~60 ms are queued, slow down slightly.
-            if (audio && SDL_GetQueuedAudioSize(audio) > 31250 * 2 * 6 / 100)
+            // For the original source PCM, slightly slow when >60ms queued.
+            // Adaptive WSOLA intentionally holds ~85ms latency. Its feedback
+            // controller handles queue drift; avoid adding 0.5ms/frame
+            // slowdown merely because the queue is safely primed.
+            if (audio && SDL_GetQueuedAudioSize(audio) >
+#ifdef KI_R36S
+                (r36s_audio_smooth ? 31250 * 2 * 16 / 100 : 31250 * 2 * 6 / 100)
+#else
+                31250 * 2 * 6 / 100
+#endif
+                )
                 next_frame += std::chrono::microseconds(500);
             auto now = std::chrono::steady_clock::now();
             if (next_frame > now) std::this_thread::sleep_until(next_frame);
@@ -1069,6 +1128,14 @@ int main(int argc, char** argv) {
         } catch (const ki::LoadStateRequest&) {
             entry = state.restore(c);
             if (audio) SDL_ClearQueuedAudio(audio);
+#ifdef KI_R36S
+            if (audio && r36s_audio_smooth) {
+                SDL_PauseAudioDevice(audio, 1);
+                audio_smoother.reset();
+                r36s_audio_primed = false;
+                r36s_audio_clock_valid = false;
+            }
+#endif
             next_frame = std::chrono::steady_clock::now();
             SDL_SetWindowTitle(window, "Killer Instinct (recompiled): state loaded");
         }
