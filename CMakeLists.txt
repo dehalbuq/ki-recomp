@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(ki_recomp LANGUAGES CXX)
 
 option(KI_R36S "R36S / PortMaster fullscreen 4:3, nearest filtering and diagnostic SDL2 fallback" OFF)
+option(KI_R36S_MIPS_O3 "Compile generated MIPS R4600 code with aggressive -O3 for a separate R36S A/B binary" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -221,7 +222,14 @@ if(KI_BUILD_FULL)
   # or LTO until we have real hardware validation.
   if(NOT MSVC)
     if(KI_R36S AND CMAKE_BUILD_TYPE STREQUAL "Release")
-      target_compile_options(ki_full_code PRIVATE -O2 -Wno-unused-parameter)
+      if(KI_R36S_MIPS_O3)
+        # Test15 experimental second executable; -O3 may increase I-cache
+        # pressure on Cortex-A35, so compare against the standard -O2 build.
+        # No unsafe -ffast-math, timing, audio or semantic changes.
+        target_compile_options(ki_full_code PRIVATE -O3 -Wno-unused-parameter)
+      else()
+        target_compile_options(ki_full_code PRIVATE -O2 -Wno-unused-parameter)
+      endif()
     else()
       target_compile_options(ki_full_code PRIVATE -O1 -Wno-unused-parameter)
     endif()
