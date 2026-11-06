@@ -127,6 +127,10 @@ extern const FuncEntry kBootFunctionTable[];
 extern const std::size_t kBootFunctionTableSize;
 void set_boot_function_table(const FuncEntry* table, std::size_t size);
 RecompFunc lookup_function(uint32_t vaddr);
+// Test20 ROM-free counter checks; reported only with
+// KI_R36S_DISPATCH_PROFILE=1. Does not mutate emulator state.
+struct DispatchStats { uint64_t hits = 0, misses = 0; };
+DispatchStats dispatch_cache_take_stats();
 
 inline void tail(Context& c, RecompFunc fn) { c.tail_fn = fn; }
 void tail_indirect(Context& c, uint32_t target, uint32_t pc);
