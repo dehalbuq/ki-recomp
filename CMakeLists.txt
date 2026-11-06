@@ -4,6 +4,10 @@ project(ki_recomp LANGUAGES CXX)
 option(KI_R36S "R36S / PortMaster fullscreen 4:3, nearest filtering and diagnostic SDL2 fallback" OFF)
 option(KI_R36S_MIPS_O3 "Compile generated MIPS R4600 code with aggressive -O3 for a separate R36S A/B binary" OFF)
 option(KI_R36S_LTO "Experimental R36S whole-program IPO/LTO for generated MIPS and runtime (A/B only)" OFF)
+option(KI_R36S_RELEASE_CLEAN "Lean R36S distributable: no runtime profilers, frame timing, dev UI or extra benchmarks" OFF)
+if(KI_R36S_RELEASE_CLEAN AND (NOT KI_R36S OR NOT CMAKE_BUILD_TYPE STREQUAL "Release"))
+  message(FATAL_ERROR "KI_R36S_RELEASE_CLEAN requires -DKI_R36S=ON -DCMAKE_BUILD_TYPE=Release")
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -239,7 +243,10 @@ if(KI_BUILD_FULL)
   target_include_directories(ki_full_code PRIVATE "${FULL_DIR}")
   ki_code_library(ki_full_code)
   if(KI_R36S)
-    target_compile_definitions(ki_full_code PRIVATE KI_R36S_FAST_COP0=1 KI_R36S_FAST_MEMORY=1 KI_R36S_GFX_PROFILE_SUPPORTED=1)
+    target_compile_definitions(ki_full_code PRIVATE KI_R36S_FAST_COP0=1 KI_R36S_FAST_MEMORY=1)
+    if(NOT KI_R36S_RELEASE_CLEAN)
+      target_compile_definitions(ki_full_code PRIVATE KI_R36S_GFX_PROFILE_SUPPORTED=1)
+    endif()
   endif()
   # Debug used -O1 even in Release, which leaves the recompiled guest
   # very slow on RK3326. Enable a conservative -O2 for handheld release builds.
@@ -380,9 +387,12 @@ if(KI_BUILD_FULL)
     target_link_libraries(ki_play PRIVATE ki_boot ki_full_code SDL2::SDL2)
     if(KI_R36S)
       target_compile_definitions(ki_play PRIVATE KI_R36S=1)
-      if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        # Resolve native AArch64 PC samples back to generated function names.
-        # Export symbols without changing generated guest code or game speed.
+      if(KI_R36S_RELEASE_CLEAN)
+        target_compile_definitions(ki_play PRIVATE KI_R36S_RELEASE_CLEAN=1)
+        # All the per-frame profilers are omitted in the release player.
+        # Do not export native generated symbols for the PC sampler.
+        message(STATUS "R36S clean release enabled: no native PC sampling or timing probes")
+      elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_link_options(ki_play PRIVATE -rdynamic)
         target_link_libraries(ki_play PRIVATE ${CMAKE_DL_LIBS})
       endif()
