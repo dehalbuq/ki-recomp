@@ -204,6 +204,8 @@ int main(int argc, char** argv) {
     const bool r36s_dsp_hotspots = std::getenv("KI_R36S_DSP_HOTSPOTS") != nullptr;
     const bool r36s_time_dsp = std::getenv("KI_R36S_TIME_DSP") != nullptr;
     const bool r36s_host_profile = std::getenv("KI_R36S_HOST_PROFILE") != nullptr;
+    // Only measure SDL texture upload, without timing every MIPS blitter.
+    const bool r36s_gpu_profile = std::getenv("KI_R36S_GPU_PROFILE") != nullptr;
     // Test17: native SDL/GLES2 ABGR8888 upload with EXACT RGB555 colours.
     // RGB24 is still the normal release path and available as an A/B control.
     bool r36s_fast_rgba = std::getenv("KI_R36S_GLES2_RGBA") != nullptr;
@@ -670,7 +672,7 @@ int main(int argc, char** argv) {
 #endif
         {
 #ifdef KI_R36S
-            const bool timing_gpu = ki_r36s::gfx_profiler::enabled();
+            const bool timing_gpu = r36s_gpu_profile || ki_r36s::gfx_profiler::enabled();
             const auto gpu_begin = timing_gpu ? std::chrono::steady_clock::now()
                                              : std::chrono::steady_clock::time_point{};
 #endif
@@ -1018,7 +1020,7 @@ int main(int argc, char** argv) {
                     r36s_audio_primed ? 1 : 0,
                     SDL_GetQueuedAudioSize(audio) / (ki_r36s::AudioSmooth::kRate * 2u / 1000u));
             }
-            if (ki_r36s::gfx_profiler::enabled()) {
+            if (r36s_gpu_profile || ki_r36s::gfx_profiler::enabled()) {
                 std::fprintf(stderr,
                     "[r36s] GFX_SDL_ES2 upload_ms_per_frame=%.3f copy_submit_ms_per_frame=%.3f "
                     "total_render_ms_per_frame=%.3f swap_ms_per_frame=%.3f "
