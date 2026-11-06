@@ -45,7 +45,7 @@ jobs:
       - name: Build and run guest-independent R36S tests
         run: |
           cmake -S . -B build-ci -G Ninja -DCMAKE_BUILD_TYPE=Debug -DKI_BUILD_FULL=OFF -DKI_R36S=ON
-          cmake --build build-ci --target runtime_selftest dcs_fastmem_selftest dsp_hotspot_selftest dsp_waitloop_selftest adsp_native_selftest kinst_vblank_fast_selftest mfc0_inline_selftest mips_idle_skip_selftest mips_memory_fast_selftest gles2_rgba_upload_selftest host_profiler_selftest gfx_profile_selftest audio_smooth_selftest --parallel 2
+          cmake --build build-ci --target runtime_selftest dcs_fastmem_selftest dsp_hotspot_selftest dsp_waitloop_selftest adsp_native_selftest kinst_vblank_fast_selftest mfc0_inline_selftest mips_idle_skip_selftest mips_memory_fast_selftest gles2_rgba_upload_selftest host_profiler_selftest gfx_profile_selftest audio_smooth_selftest dispatch_cache_selftest --parallel 2
           ctest --test-dir build-ci --output-on-failure
       - name: Verify GNU ld circular archive link fix without game data
         run: |
@@ -70,49 +70,35 @@ jobs:
           d = json.loads((p / "port.json").read_text())
           assert d["version"] == 4 and d["attr"]["arch"] == ["aarch64"]
           assert d["items"] == ["Killer Instinct Arcade.sh", "killerinstinct"]
-          for entry in ("gameinfo.xml", "KI R36S - RGBA Audio Original.sh",
-                        "KI R36S - RGBA Audio Smooth.sh"):
-              assert (p / entry).exists(), entry
-          original = (p / "KI R36S - RGBA Audio Original.sh").read_text()
-          smooth = (p / "KI R36S - RGBA Audio Smooth.sh").read_text()
-          assert "KI_R36S_GLES2_RGBA=1" in original and "unset KI_R36S_AUDIO_SMOOTH" in original
-          assert "KI_R36S_GLES2_RGBA=1" in smooth and "KI_R36S_AUDIO_SMOOTH=1" in smooth
-          print("PortMaster Test18 A/B launcher metadata: OK")
-          test19 = (
-              "KI R36S - Test19 NEON Update.sh",
-              "KI R36S - Test19 NEON Locked.sh",
-              "KI R36S - Test19 Scalar Locked.sh",
-              "KI R36S - Test19 NEON NoClear.sh",
-          )
-          for entry in test19:
-              script = (p / entry).read_text()
-              assert "KI_R36S_GPU_PROFILE=1" in script, entry
-              assert "KI_R36S_AUDIO_SMOOTH=1" in script, entry
-              assert "KI_R36S_GLES2_RGBA=1" in script, entry
-          assert "KI_R36S_DIRECT_TEXTURE=1" not in (p / test19[0]).read_text()
-          assert "KI_R36S_DIRECT_TEXTURE=1" in (p / test19[1]).read_text()
-          assert "KI_R36S_RGBA_SCALAR=1" in (p / test19[2]).read_text()
-          assert "KI_R36S_NO_CLEAR=1" in (p / test19[3]).read_text()
-          print("PortMaster Test19 independent RK3326 A/B launchers: OK")
+          scripts = sorted(f.name for f in p.glob("*.sh"))
+          assert scripts == ["KI R36S - Host Profile.sh",
+                             "Killer Instinct Arcade.sh"], scripts
+          assert (p / "gameinfo.xml").exists()
+          game = (p / "Killer Instinct Arcade.sh").read_text()
+          diag = (p / "KI R36S - Host Profile.sh").read_text()
+          for required in ("KI_R36S_GLES2_RGBA=1", "KI_R36S_AUDIO_SMOOTH=1"):
+              assert required in game
+          for required in ("KI_R36S_DISPATCH_PROFILE=1",
+                           "KI_R36S_TIME_DSP=1",
+                           "KI_R36S_GPU_PROFILE=1",
+                           "KI_R36S_HOST_PROFILE=1"):
+              assert required in diag
+          print("Test20: exactly two PortMaster entries and optimized defaults OK")
           PY
-      - name: Test Test18 ZIP packaging with synthetic AArch64 ELF (not a game)
+      - name: Test Test20 ZIP packaging with synthetic AArch64 ELF (not a game)
         run: |
           echo 'int main(void) { return 0; }' | c++ -x c++ - -o /tmp/ki-romfree-elf
-          python3 tools/r36s/package_port.py /tmp/ki-romfree-elf --output /tmp/ki-test18-smoke.zip
+          python3 tools/r36s/package_port.py /tmp/ki-romfree-elf --output /tmp/ki-test20-smoke.zip
           python3 - <<'PY'
           import zipfile
-          with zipfile.ZipFile("/tmp/ki-test18-smoke.zip") as z:
+          with zipfile.ZipFile("/tmp/ki-test20-smoke.zip") as z:
               names = set(z.namelist())
               for entry in ("killerinstinct/ki_play.aarch64",
-                            "KI R36S - RGBA Audio Original.sh",
-                            "KI R36S - RGBA Audio Smooth.sh",
-                            "KI R36S - Test19 NEON Update.sh",
-                            "KI R36S - Test19 NEON Locked.sh",
-                            "KI R36S - Test19 Scalar Locked.sh",
-                            "KI R36S - Test19 NEON NoClear.sh"):
+                            "Killer Instinct Arcade.sh",
+                            "KI R36S - Host Profile.sh"):
                   assert entry in names, f"Missing from package: {entry}"
               assert not any(n.endswith((".chd", ".bin", ".u98")) or
                              n.lower().endswith("/kinst.zip") for n in names)
               assert z.testzip() is None
-          print("ROM-free Test18 A/B package smoke test OK")
+          print("ROM-free Test20 two-launcher package smoke test OK")
           PY
