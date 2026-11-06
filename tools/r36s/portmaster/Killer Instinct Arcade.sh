@@ -149,13 +149,59 @@ if [ -n "${sdl_controllerconfig:-}" ]; then
 fi
 # Library search path was selected together with the binary above.
 # Do not bundle, override or upgrade the firmware's GLIBC/ld-linux/GBM/EGL.
+if [[ "$KI_VARIANT" == legacy* ]]; then
+  # ArkOS4Clone firmware uses an older Mali DRM/GBM EGL stack.
+  # KMSDRM+GLES2 should use firmware EGL rather than desktop OpenGL.
+  export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
+  export SDL_VIDEO_FORCE_EGL="${SDL_VIDEO_FORCE_EGL:-1}"
+  export SDL_RENDER_DRIVER="${SDL_RENDER_DRIVER:-opengles2}"
+  # In legacy mode log SDL's chosen backend and GBM visual attempts.
+  export KI_R36S_VIDEO_DIAG=1
+  echo "[r36s] ArkOS video hints: SDL_VIDEODRIVER=$SDL_VIDEODRIVER SDL_VIDEO_FORCE_EGL=$SDL_VIDEO_FORCE_EGL"
+fi
 export SDL_RENDER_SCALE_QUALITY=0
 echo "SDL video: ${SDL_VIDEODRIVER:-auto}; SDL audio: ${SDL_AUDIODRIVER:-auto}"
 chmod +x "$BIN" || true
 cd "$GAMEDIR" || exit 3
 if declare -F pm_platform_helper >/dev/null; then pm_platform_helper "$BIN"; fi
-"$BIN" --data "$GAMEDIR/gamedata" --aspect 4:3 --scale 2
-code=$?
+# Run once with the legacy ABI-matched, patched SDL2. If the window
+# specifically fails at GBM/EGL, retry just that startup with the
+# firmware-provided SDL2. Do NOT retry gameplay failures or audio errors.
+if [[ "$KI_VARIANT" == legacy* ]]; then
+  attempt_log="$GAMEDIR/logs/ki-r36s-legacy-video-attempt.log"
+  "$BIN" --data "$GAMEDIR/gamedata" --aspect 4:3 --scale 2 2>&1 | tee "$attempt_log"
+  code=${PIPESTATUS[0]}
+  if [ "$code" -ne 0 ] &&
+     grep -Eq 'SDL_CreateWindow failed:.*(GBM|EGL)|KI KMSDRM: no compatible GBM/EGL' "$attempt_log"; then
+    echo "[r36s] Legacy patched SDL2 could not create a window; checking firmware SDL2 fallback."
+    system_sdl=''
+    for candidate in \
+      /usr/lib/aarch64-linux-gnu/libSDL2-2.0.so.0 \
+      /usr/lib/libSDL2-2.0.so.0 \
+      /usr/local/lib/libSDL2-2.0.so.0 \
+      /usr/local/lib/aarch64-linux-gnu/libSDL2-2.0.so.0 \
+      /lib/aarch64-linux-gnu/libSDL2-2.0.so.0 \
+      /lib/libSDL2-2.0.so.0; do
+      if [ -f "$candidate" ] && [ -r "$candidate" ]; then
+        system_sdl="$candidate"
+        break
+      fi
+    done
+    if [ -n "$system_sdl" ]; then
+      echo "[r36s] Retry 2: preloading firmware SDL2 $system_sdl (still using old-ABI C++ libraries)"
+      # LD_PRELOAD with the same SONAME satisfies NEEDED:libSDL2-2.0.so.0
+      # without overwriting firmware files or bundling glibc/EGL/GBM.
+      LD_PRELOAD="$system_sdl${LD_PRELOAD:+ $LD_PRELOAD}" \
+        "$BIN" --data "$GAMEDIR/gamedata" --aspect 4:3 --scale 2
+      code=$?
+    else
+      echo "[r36s] Firmware SDL2 not located in standard paths; leaving original EGL diagnostic."
+    fi
+  fi
+else
+  "$BIN" --data "$GAMEDIR/gamedata" --aspect 4:3 --scale 2
+  code=$?
+fi
 echo "ki_play exit code: $code"
 if declare -F pm_finish >/dev/null; then pm_finish; fi
 exit "$code"
