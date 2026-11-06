@@ -21,6 +21,11 @@ android {
             }
         }
     }
+    // Private sideload build for legacy Android devices; not a Google Play release.
+    // Keep all lint checks except the Play publishing targetSdk requirement.
+    lint {
+        disable 'ExpiredTargetSdkVersion'
+    }
     buildTypes {
         debug { debuggable true }
         release {
