@@ -176,6 +176,9 @@ if(KI_R36S AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_test(NAME gfx_profile_selftest COMMAND gfx_profile_selftest)
   add_executable(audio_smooth_selftest tests/audio_smooth_selftest.cpp)
   add_test(NAME audio_smooth_selftest COMMAND audio_smooth_selftest)
+  add_executable(boot_wipe_selftest tests/boot_wipe_selftest.cpp)
+  target_include_directories(boot_wipe_selftest PRIVATE src)
+  add_test(NAME boot_wipe_selftest COMMAND boot_wipe_selftest)
   # Building the graphics test suite must also materialize the newer
   # GLES2 RGB555/RGBA differential test before ctest --test-dir.
   add_dependencies(gfx_profile_selftest gles2_rgba_upload_selftest audio_smooth_selftest)
