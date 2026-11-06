@@ -1,4 +1,5 @@
 #include "ki/kinst_board.h"
+#include "ki/rgb555_upload.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -95,10 +96,6 @@ void KinstBoard::update(Context& c) {
         if (on_vblank) on_vblank(c, frame_);
     }
 }
-
-// Source of KI RGB555 expansion shared with the optional native RGBA
-// upload path. The original RGB24 renderer remains untouched as baseline.
-#include "ki/rgb555_upload.h"
 
 void KinstBoard::framebuffer_rgba_into(const Context& c, std::vector<uint32_t>& rgba) const {
     constexpr size_t kPixels = 320u * 240u;
