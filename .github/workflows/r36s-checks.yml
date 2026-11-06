@@ -4,6 +4,8 @@ on:
     branches: [port/r36s-portmaster]
   pull_request:
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   cross-compiler-smoke:
     runs-on: ubuntu-24.04
@@ -40,7 +42,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake ninja-build g++ libsdl2-dev
-      - name: Build guest-independent runtime self-test
+      - name: Build and run guest-independent R36S tests
         run: |
           cmake -S . -B build-ci -G Ninja -DCMAKE_BUILD_TYPE=Debug -DKI_BUILD_FULL=OFF -DKI_R36S=ON
           cmake --build build-ci --target runtime_selftest dcs_fastmem_selftest dsp_hotspot_selftest dsp_waitloop_selftest adsp_native_selftest kinst_vblank_fast_selftest mfc0_inline_selftest mips_idle_skip_selftest mips_memory_fast_selftest gles2_rgba_upload_selftest host_profiler_selftest gfx_profile_selftest audio_smooth_selftest --parallel 2
@@ -53,11 +55,10 @@ jobs:
       - name: Compile R36S SDL player translation units (syntax-only)
         run: |
           c++ -std=c++20 -fsyntax-only -DKI_R36S=1 -Iruntime/include -Ithird_party/adsp2100 -Isrc $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
-      - name: Check PortMaster packaging scripts and metadata
+      - name: Check launchers, build scripts and metadata
         run: |
-          bash -n tools/r36s/build.sh
-          bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
-          bash -n tools/r36s/diagnose.sh
+          bash -n tools/r36s/build.sh tools/r36s/diagnose.sh
+          find tools/r36s/portmaster -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
           python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py tools/kirecomp/idle_patterns.py
           python3 tools/kirecomp/idle_patterns.py
           python3 tools/r36s/prepare_data.py --help >/dev/null
@@ -65,206 +66,33 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-          p=Path("tools/r36s/portmaster")
-          d=json.loads((p/"port.json").read_text())
-          assert d["version"]==4 and d["attr"]["arch"]==["aarch64"]
-          assert d["items"]==["Killer Instinct Arcade.sh","killerinstinct"]
-          assert (p/"gameinfo.xml").exists()
-          print("Prototype PortMaster metadata: OK (not a public submission)")
+          p = Path("tools/r36s/portmaster")
+          d = json.loads((p / "port.json").read_text())
+          assert d["version"] == 4 and d["attr"]["arch"] == ["aarch64"]
+          assert d["items"] == ["Killer Instinct Arcade.sh", "killerinstinct"]
+          for entry in ("gameinfo.xml", "KI R36S - RGBA Audio Original.sh",
+                        "KI R36S - RGBA Audio Smooth.sh"):
+              assert (p / entry).exists(), entry
+          original = (p / "KI R36S - RGBA Audio Original.sh").read_text()
+          smooth = (p / "KI R36S - RGBA Audio Smooth.sh").read_text()
+          assert "KI_R36S_GLES2_RGBA=1" in original and "unset KI_R36S_AUDIO_SMOOTH" in original
+          assert "KI_R36S_GLES2_RGBA=1" in smooth and "KI_R36S_AUDIO_SMOOTH=1" in smooth
+          print("PortMaster Test18 A/B launcher metadata: OK")
           PY
-
-      - name: Verify GNU ld circular archive link fix without game data
+      - name: Test Test18 ZIP packaging with synthetic AArch64 ELF (not a game)
         run: |
-          cmake -S tests/r36s_link_smoke -B build-link-smoke -G Ninja
-          cmake --build build-link-smoke --parallel 2
-          ctest --test-dir build-link-smoke --output-on-failure
-      - name: Compile R36S SDL player translation units (syntax-only)
-        run: |
-          c++ -std=c++20 -fsyntax-only -DKI_R36S=1 -Iruntime/include -Ithird_party/adsp2100 -Isrc $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
-      - name: Check PortMaster packaging scripts and metadata
-        run: |
-          bash -n tools/r36s/build.sh
-          bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
-          bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py tools/kirecomp/idle_patterns.py
-          python3 tools/kirecomp/idle_patterns.py
-          python3 tools/r36s/prepare_data.py --help >/dev/null
-          python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
+          echo 'int main(void) { return 0; }' | c++ -x c++ - -o /tmp/ki-romfree-elf
+          python3 tools/r36s/package_port.py /tmp/ki-romfree-elf --output /tmp/ki-test18-smoke.zip
           python3 - <<'PY'
-          import json
-          from pathlib import Path
-          p=Path("tools/r36s/portmaster")
-          d=json.loads((p/"port.json").read_text())
-          assert d["version"]==4 and d["attr"]["arch"]==["aarch64"]
-          assert d["items"]==["Killer Instinct Arcade.sh","killerinstinct"]
-          assert (p/"gameinfo.xml").exists()
-          print("Prototype PortMaster metadata: OK (not a public submission)")
-          PY
-
-      - name: Verify GNU ld circular archive link fix without game data
-        run: |
-          cmake -S tests/r36s_link_smoke -B build-link-smoke -G Ninja
-          cmake --build build-link-smoke --parallel 2
-          ctest --test-dir build-link-smoke --output-on-failure
-      - name: Compile R36S SDL player translation units (syntax-only)
-        run: |
-          c++ -std=c++20 -fsyntax-only -DKI_R36S=1 -Iruntime/include -Ithird_party/adsp2100 -Isrc $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
-      - name: Check PortMaster packaging scripts and metadata
-        run: |
-          bash -n tools/r36s/build.sh
-          bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
-          bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py tools/kirecomp/idle_patterns.py
-          python3 tools/kirecomp/idle_patterns.py
-          python3 tools/r36s/prepare_data.py --help >/dev/null
-          python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          p=Path("tools/r36s/portmaster")
-          d=json.loads((p/"port.json").read_text())
-          assert d["version"]==4 and d["attr"]["arch"]==["aarch64"]
-          assert d["items"]==["Killer Instinct Arcade.sh","killerinstinct"]
-          assert (p/"gameinfo.xml").exists()
-          print("Prototype PortMaster metadata: OK (not a public submission)")
-          PY
-
-      - name: Verify GNU ld circular archive link fix without game data
-        run: |
-          cmake -S tests/r36s_link_smoke -B build-link-smoke -G Ninja
-          cmake --build build-link-smoke --parallel 2
-          ctest --test-dir build-link-smoke --output-on-failure
-      - name: Compile R36S SDL player translation units (syntax-only)
-        run: |
-          c++ -std=c++20 -fsyntax-only -DKI_R36S=1 -Iruntime/include -Ithird_party/adsp2100 -Isrc $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
-      - name: Check PortMaster packaging scripts and metadata
-        run: |
-          bash -n tools/r36s/build.sh
-          bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
-          bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py tools/kirecomp/idle_patterns.py
-          python3 tools/kirecomp/idle_patterns.py
-          python3 tools/r36s/prepare_data.py --help >/dev/null
-          python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          p=Path("tools/r36s/portmaster")
-          d=json.loads((p/"port.json").read_text())
-          assert d["version"]==4 and d["attr"]["arch"]==["aarch64"]
-          assert d["items"]==["Killer Instinct Arcade.sh","killerinstinct"]
-          assert (p/"gameinfo.xml").exists()
-          print("Prototype PortMaster metadata: OK (not a public submission)")
-          PY
-
-      - name: Verify GNU ld circular archive link fix without game data
-        run: |
-          cmake -S tests/r36s_link_smoke -B build-link-smoke -G Ninja
-          cmake --build build-link-smoke --parallel 2
-          ctest --test-dir build-link-smoke --output-on-failure
-      - name: Compile R36S SDL player translation units (syntax-only)
-        run: |
-          c++ -std=c++20 -fsyntax-only -DKI_R36S=1 -Iruntime/include -Ithird_party/adsp2100 -Isrc $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
-      - name: Check PortMaster packaging scripts and metadata
-        run: |
-          bash -n tools/r36s/build.sh
-          bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
-          bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py tools/kirecomp/idle_patterns.py
-          python3 tools/kirecomp/idle_patterns.py
-          python3 tools/r36s/prepare_data.py --help >/dev/null
-          python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          p=Path("tools/r36s/portmaster")
-          d=json.loads((p/"port.json").read_text())
-          assert d["version"]==4 and d["attr"]["arch"]==["aarch64"]
-          assert d["items"]==["Killer Instinct Arcade.sh","killerinstinct"]
-          assert (p/"gameinfo.xml").exists()
-          print("Prototype PortMaster metadata: OK (not a public submission)")
-          PY
-
-      - name: Verify GNU ld circular archive link fix without game data
-        run: |
-          cmake -S tests/r36s_link_smoke -B build-link-smoke -G Ninja
-          cmake --build build-link-smoke --parallel 2
-          ctest --test-dir build-link-smoke --output-on-failure
-      - name: Compile R36S SDL player translation units (syntax-only)
-        run: |
-          c++ -std=c++20 -fsyntax-only -DKI_R36S=1 -Iruntime/include -Ithird_party/adsp2100 -Isrc $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
-      - name: Check PortMaster packaging scripts and metadata
-        run: |
-          bash -n tools/r36s/build.sh
-          bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
-          bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py tools/kirecomp/idle_patterns.py
-          python3 tools/kirecomp/idle_patterns.py
-          python3 tools/r36s/prepare_data.py --help >/dev/null
-          python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          p=Path("tools/r36s/portmaster")
-          d=json.loads((p/"port.json").read_text())
-          assert d["version"]==4 and d["attr"]["arch"]==["aarch64"]
-          assert d["items"]==["Killer Instinct Arcade.sh","killerinstinct"]
-          assert (p/"gameinfo.xml").exists()
-          print("Prototype PortMaster metadata: OK (not a public submission)")
-          PY
-
-      - name: Verify GNU ld circular archive link fix without game data
-        run: |
-          cmake -S tests/r36s_link_smoke -B build-link-smoke -G Ninja
-          cmake --build build-link-smoke --parallel 2
-          ctest --test-dir build-link-smoke --output-on-failure
-      - name: Compile R36S SDL player translation units (syntax-only)
-        run: |
-          c++ -std=c++20 -fsyntax-only -DKI_R36S=1 -Iruntime/include -Ithird_party/adsp2100 -Isrc $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
-      - name: Check PortMaster packaging scripts and metadata
-        run: |
-          bash -n tools/r36s/build.sh
-          bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
-          bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py tools/kirecomp/idle_patterns.py
-          python3 tools/kirecomp/idle_patterns.py
-          python3 tools/r36s/prepare_data.py --help >/dev/null
-          python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          p=Path("tools/r36s/portmaster")
-          d=json.loads((p/"port.json").read_text())
-          assert d["version"]==4 and d["attr"]["arch"]==["aarch64"]
-          assert d["items"]==["Killer Instinct Arcade.sh","killerinstinct"]
-          assert (p/"gameinfo.xml").exists()
-          print("Prototype PortMaster metadata: OK (not a public submission)")
-          PY
-
-      - name: Verify GNU ld circular archive link fix without game data
-        run: |
-          cmake -S tests/r36s_link_smoke -B build-link-smoke -G Ninja
-          cmake --build build-link-smoke --parallel 2
-          ctest --test-dir build-link-smoke --output-on-failure
-      - name: Compile R36S SDL player translation units (syntax-only)
-        run: |
-          c++ -std=c++20 -fsyntax-only -DKI_R36S=1 -Iruntime/include -Ithird_party/adsp2100 -Isrc $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
-      - name: Check PortMaster packaging scripts and metadata
-        run: |
-          bash -n tools/r36s/build.sh
-          bash -n "tools/r36s/portmaster/Killer Instinct Arcade.sh"
-          bash -n tools/r36s/diagnose.sh
-          python3 -m py_compile tools/r36s/package_port.py tools/r36s/prepare_data.py tools/r36s/generate_adsp_native.py tools/kirecomp/idle_patterns.py
-          python3 tools/kirecomp/idle_patterns.py
-          python3 tools/r36s/prepare_data.py --help >/dev/null
-          python3 -m json.tool tools/r36s/portmaster/port.json >/dev/null
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          p=Path("tools/r36s/portmaster")
-          d=json.loads((p/"port.json").read_text())
-          assert d["version"]==4 and d["attr"]["arch"]==["aarch64"]
-          assert d["items"]==["Killer Instinct Arcade.sh","killerinstinct"]
-          assert (p/"gameinfo.xml").exists()
-          print("Prototype PortMaster metadata: OK (not a public submission)")
+          import zipfile
+          with zipfile.ZipFile("/tmp/ki-test18-smoke.zip") as z:
+              names = set(z.namelist())
+              for entry in ("killerinstinct/ki_play.aarch64",
+                            "KI R36S - RGBA Audio Original.sh",
+                            "KI R36S - RGBA Audio Smooth.sh"):
+                  assert entry in names, f"Missing from package: {entry}"
+              assert not any(n.endswith((".chd", ".bin", ".u98")) or
+                             n.lower().endswith("/kinst.zip") for n in names)
+              assert z.testzip() is None
+          print("ROM-free Test18 A/B package smoke test OK")
           PY
