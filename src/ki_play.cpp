@@ -465,6 +465,8 @@ int main(int argc, char** argv) {
     uint64_t r36s_native_opcode_last = 0;
     uint64_t r36s_mips_idle_last = 0;
     double r36s_render_ms = 0, r36s_rgb_ms = 0, r36s_swap_ms = 0;
+    // Diagnostic-only split of SDL/ES2 upload vs. draw submission.
+    double r36s_tex_upload_ms = 0, r36s_gpu_copy_ms = 0;
     auto r36s_cpu_begin = std::clock();
     auto r36s_proc_read_bytes = []() -> unsigned long long {
         std::ifstream file("/proc/self/io");
@@ -582,8 +584,26 @@ int main(int argc, char** argv) {
         if (!hd_on)
 #endif
         {
+#ifdef KI_R36S
+            const bool timing_gpu = ki_r36s::gfx_profiler::enabled();
+            const auto gpu_begin = timing_gpu ? std::chrono::steady_clock::now()
+                                             : std::chrono::steady_clock::time_point{};
+#endif
             SDL_UpdateTexture(texture, nullptr, rgb.data(), 320 * 3);
+#ifdef KI_R36S
+            const auto gpu_uploaded = timing_gpu ? std::chrono::steady_clock::now()
+                                                : std::chrono::steady_clock::time_point{};
+#endif
             SDL_RenderCopyF(renderer, texture, nullptr, &game);
+#ifdef KI_R36S
+            if (timing_gpu) {
+                const auto gpu_copied = std::chrono::steady_clock::now();
+                r36s_tex_upload_ms += std::chrono::duration<double, std::milli>(
+                    gpu_uploaded - gpu_begin).count();
+                r36s_gpu_copy_ms += std::chrono::duration<double, std::milli>(
+                    gpu_copied - gpu_uploaded).count();
+            }
+#endif
         }
         // The setup screen is laid out for the 4:3 area.
         SDL_Rect area{static_cast<int>(game.x), 0, 320, 240};
@@ -838,6 +858,18 @@ int main(int argc, char** argv) {
             if (r36s_host_profile)
                 ki_r36s::host_profiler::report(r36s_sample_frames);
             ki_r36s::gfx_profiler::report(r36s_sample_frames);
+            if (ki_r36s::gfx_profiler::enabled()) {
+                std::fprintf(stderr,
+                    "[r36s] GFX_SDL_ES2 upload_ms_per_frame=%.3f copy_submit_ms_per_frame=%.3f "
+                    "total_render_ms_per_frame=%.3f swap_ms_per_frame=%.3f "
+                    "cpu_rgb_ms_per_frame=%.3f samples=%u\n",
+                    r36s_tex_upload_ms / render_div,
+                    r36s_gpu_copy_ms / render_div,
+                    r36s_render_ms / render_div,
+                    r36s_swap_ms / render_div,
+                    r36s_rgb_ms / render_div,
+                    r36s_present_frames);
+            }
             if (c.fast_mips_idle) {
                 const uint64_t saved = c.mips_idle_skipped_cycles;
                 std::fprintf(stderr, "[r36s] MIPS_IDLE saved=%llu cycles_this_window total=%llu iterations=%llu\n",
@@ -885,6 +917,7 @@ int main(int argc, char** argv) {
             r36s_read_begin = reads_now;
             r36s_present_frames = 0;
             r36s_render_ms = r36s_rgb_ms = r36s_swap_ms = 0.0;
+            r36s_tex_upload_ms = r36s_gpu_copy_ms = 0.0;
             r36s_sample_frames = 0;
             r36s_sample_start = stamp;
         }
