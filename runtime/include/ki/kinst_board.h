@@ -38,6 +38,8 @@ public:
     // boot with INITIALIZE DEVICE PARAMETERS (KI 1: 14 heads x 40 sectors).
     void set_logical_geometry(uint32_t heads, uint32_t spt) { logical_heads_ = heads; logical_spt_ = spt; }
     uint64_t next_event(Context& c) override;
+    // Include VBlank falling edge so MIPS polling cannot jump over it.
+    uint64_t irq_edge(Context& c) override;
     void update(Context& c) override;
 
     // Called at the start of every VBLANK with the frame number (from 1).
