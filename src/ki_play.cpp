@@ -197,6 +197,20 @@ int main(int argc, char** argv) {
     // Disable it to avoid expensive blocking at SDL_RenderPresent, but keep
     // the existing guest 58.98 Hz frame pacer, so game speed does not increase.
     SDL_SetHintWithPriority(SDL_HINT_RENDER_VSYNC, "0", SDL_HINT_OVERRIDE);
+#ifdef KI_R36S_RELEASE_CLEAN
+    // No diagnostics or A/B benchmark paths in the final player.
+    constexpr bool r36s_bench_no_dcs = false;
+    constexpr bool r36s_audio_trace = false;
+    constexpr bool r36s_dsp_hotspots = false;
+    constexpr bool r36s_time_dsp = false;
+    constexpr bool r36s_host_profile = false;
+    constexpr bool r36s_gpu_profile = false;
+    constexpr bool r36s_no_clear = false;
+    constexpr bool r36s_fast_rgba = true;
+    constexpr bool r36s_direct_texture = false;
+    constexpr bool r36s_rgba_scalar = false;
+    constexpr int r36s_bench_render_every = 1;
+#else
     const bool r36s_bench_no_dcs = std::getenv("KI_R36S_BENCH_NO_DCS") != nullptr;
     const bool r36s_audio_trace = std::getenv("KI_R36S_AUDIO_TRACE") != nullptr;
     const bool r36s_audio_smooth = std::getenv("KI_R36S_AUDIO_SMOOTH") != nullptr;
@@ -224,11 +238,14 @@ int main(int argc, char** argv) {
     // Compare NEON conversion against the exact scalar reference on RK3326.
     const bool r36s_rgba_scalar = std::getenv("KI_R36S_RGBA_SCALAR") != nullptr;
     const int r36s_bench_render_every = std::getenv("KI_R36S_BENCH_RENDER_QUARTER") ? 4 : 1;
+#endif
+#ifndef KI_R36S_RELEASE_CLEAN
     std::fprintf(stderr, "[r36s] fullscreen 4:3 / nearest / original 58.98 Hz timing; VSync requested OFF\n");
     if (r36s_bench_no_dcs)
         std::fprintf(stderr, "[r36s] BENCHMARK: audio DSP disabled (diagnosis only; NOT normal gameplay)\n");
     if (r36s_bench_render_every != 1)
         std::fprintf(stderr, "[r36s] BENCHMARK: draw 1 in 4 guest frames (diagnosis only; not default)\n");
+#endif
 #endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
@@ -320,6 +337,7 @@ int main(int argc, char** argv) {
             "[r36s] TEST19: locked texture requires RGBA; using baseline SDL_UpdateTexture\n");
         r36s_direct_texture = false;
     }
+#ifndef KI_R36S_RELEASE_CLEAN
     std::fprintf(stderr, "[r36s] TEST19 optional opaque fullscreen no-clear=%d\n",
                  r36s_no_clear ? 1 : 0);
     std::fprintf(stderr, "[r36s] TEST19 convert=%s upload=%s (direct lock auto-fallback)\n",
@@ -330,6 +348,7 @@ int main(int argc, char** argv) {
         "scalar (NEON unavailable)",
 #endif
         r36s_direct_texture ? "SDL_LockTexture direct" : "SDL_UpdateTexture");
+#endif
 #endif
     SDL_Texture* hd_texture = nullptr;  // 4x picture when an HD pack is loaded (H toggles)
 
@@ -536,6 +555,7 @@ int main(int argc, char** argv) {
     bool r36s_menu_open = false;
     int r36s_menu_choice = 0;
     Uint32 r36s_menu_action_ms = 0;
+#ifndef KI_R36S_RELEASE_CLEAN
     auto r36s_sample_start = std::chrono::steady_clock::now();
     unsigned r36s_sample_frames = 0;
     // Optional deterministic PCM trace for interpreter vs future KI HLE tests.
@@ -577,6 +597,7 @@ int main(int argc, char** argv) {
         return val;
     };
     unsigned long long r36s_read_begin = r36s_proc_read_bytes();
+#endif // !KI_R36S_RELEASE_CLEAN
     std::vector<uint8_t> r36s_frame_rgb;
     r36s_frame_rgb.reserve(320 * 240 * 3);
     // Preallocated (resized once) and reused: no per-frame GPU staging alloc.
@@ -598,7 +619,9 @@ int main(int argc, char** argv) {
     static ki::pad::SetupScreen pad_setup(pad_actions, pref_path() + "pad_map.txt");
     auto present = [&](ki::Context& ctx) {
 #ifdef KI_R36S
+#ifndef KI_R36S_RELEASE_CLEAN
         const auto render_begin = std::chrono::steady_clock::now();
+#endif
 #endif
 #ifdef KI_R36S
         if (!r36s_no_clear || wide) {
@@ -610,7 +633,9 @@ int main(int argc, char** argv) {
         SDL_RenderClear(renderer);
 #endif
 #ifdef KI_R36S
+#ifndef KI_R36S_RELEASE_CLEAN
         const auto rgb_begin = std::chrono::steady_clock::now();
+#endif
         if (r36s_fast_rgba) {
             if (!r36s_direct_texture) {
                 if (r36s_rgba_scalar) {
@@ -630,8 +655,10 @@ int main(int argc, char** argv) {
             board.framebuffer_rgb_into(ctx, r36s_frame_rgb);
         }
         const std::vector<uint8_t>& rgb = r36s_frame_rgb;
+#ifndef KI_R36S_RELEASE_CLEAN
         r36s_rgb_ms += std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - rgb_begin).count();
+#endif
 #else
         auto rgb = board.framebuffer_rgb(ctx);
 #endif
@@ -695,9 +722,11 @@ int main(int argc, char** argv) {
 #endif
         {
 #ifdef KI_R36S
+#ifndef KI_R36S_RELEASE_CLEAN
             const bool timing_gpu = r36s_gpu_profile || ki_r36s::gfx_profiler::enabled();
             const auto gpu_begin = timing_gpu ? std::chrono::steady_clock::now()
                                              : std::chrono::steady_clock::time_point{};
+#endif
 #endif
 #ifdef KI_R36S
             if (r36s_fast_rgba && r36s_direct_texture) {
@@ -706,16 +735,20 @@ int main(int argc, char** argv) {
                 const int lock_result = SDL_LockTexture(
                     texture, nullptr, &locked_pixels, &locked_pitch);
                 if (lock_result == 0 && locked_pixels && locked_pitch >= 320*4) {
+#ifndef KI_R36S_RELEASE_CLEAN
                     const auto convert_begin = timing_gpu ? std::chrono::steady_clock::now()
                         : std::chrono::steady_clock::time_point{};
+#endif
                     ki::rgb555_to_abgr8888_pitched(
                         ctx.sram.data() + board.displayed_bank(),
                         static_cast<uint8_t*>(locked_pixels),
                         320u, 240u, static_cast<size_t>(locked_pitch),
                         !r36s_rgba_scalar);
+#ifndef KI_R36S_RELEASE_CLEAN
                     if (timing_gpu)
                         r36s_direct_convert_ms += std::chrono::duration<double, std::milli>(
                             std::chrono::steady_clock::now() - convert_begin).count();
+#endif
                     SDL_UnlockTexture(texture);
                 } else {
                     // Firmware SDL2 drivers may reject streaming texture locks:
@@ -737,11 +770,14 @@ int main(int argc, char** argv) {
             SDL_UpdateTexture(texture, nullptr, rgb.data(), 320 * 3);
 #endif
 #ifdef KI_R36S
+#ifndef KI_R36S_RELEASE_CLEAN
             const auto gpu_uploaded = timing_gpu ? std::chrono::steady_clock::now()
                                                 : std::chrono::steady_clock::time_point{};
 #endif
+#endif
             SDL_RenderCopyF(renderer, texture, nullptr, &game);
 #ifdef KI_R36S
+#ifndef KI_R36S_RELEASE_CLEAN
             if (timing_gpu) {
                 const auto gpu_copied = std::chrono::steady_clock::now();
                 r36s_tex_upload_ms += std::chrono::duration<double, std::milli>(
@@ -749,6 +785,7 @@ int main(int argc, char** argv) {
                 r36s_gpu_copy_ms += std::chrono::duration<double, std::milli>(
                     gpu_copied - gpu_uploaded).count();
             }
+#endif
 #endif
         }
         // The setup screen is laid out for the 4:3 area.
@@ -758,15 +795,19 @@ int main(int argc, char** argv) {
         SDL_RenderSetViewport(renderer, nullptr);
 #ifdef KI_R36S
         if (r36s_menu_open) ki_r36s::draw(renderer, r36s_menu_choice);
+#ifndef KI_R36S_RELEASE_CLEAN
         const auto swap_begin = std::chrono::steady_clock::now();
+#endif
 #endif
         SDL_RenderPresent(renderer);
 #ifdef KI_R36S
+#ifndef KI_R36S_RELEASE_CLEAN
         r36s_swap_ms += std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - swap_begin).count();
         r36s_render_ms += std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - render_begin).count();
         ++r36s_present_frames;
+#endif
 #endif
     };
     board.on_vblank = [&](ki::Context& ctx, uint64_t frame) {
@@ -776,12 +817,14 @@ int main(int argc, char** argv) {
                 ctx.sram.data() + board.displayed_bank(), frame);
             if (detected_fast != r36s_boot_blue_fast) {
                 r36s_boot_blue_fast = detected_fast;
+#ifndef KI_R36S_RELEASE_CLEAN
                 const auto& p = r36s_boot_blue_detector.last_probe();
                 std::fprintf(stderr,
                     "[r36s] BOOT_BLUE transition=%s guest_frame=%llu top_blue_rows=%u/30 sampled_blue=%u/30\n",
                     detected_fast ? "FAST" : "NORMAL",
                     static_cast<unsigned long long>(frame),
                     p.top_rows, p.blue_rows);
+#endif
                 // Startup turbo drops *playback* (not emulated DSP work) and
                 // resets the SDL queue, so boot audio cannot play back late
                 // when the original 58.98 Hz gameplay pacing resumes.
@@ -794,6 +837,7 @@ int main(int argc, char** argv) {
                 }
                 next_frame = std::chrono::steady_clock::now();
             }
+#ifndef KI_R36S_RELEASE_CLEAN
             if (frame <= ki_r36s::BlueBootWipe::kMaxBootFrames && frame % 90 == 0) {
                 const auto& p = r36s_boot_blue_detector.last_probe();
                 std::fprintf(stderr,
@@ -802,6 +846,7 @@ int main(int argc, char** argv) {
                     p.blue_rows, p.top_rows, p.bottom_rows,
                     r36s_boot_blue_fast ? 1 : 0);
             }
+#endif // !KI_R36S_RELEASE_CLEAN
         }
 #endif
         SDL_Event ev;
@@ -1038,6 +1083,7 @@ int main(int argc, char** argv) {
         } else {
             quit_combo_since = 0;
         }
+#ifndef KI_R36S_RELEASE_CLEAN
         ++r36s_sample_frames;
         auto stamp = std::chrono::steady_clock::now();
         double secs = std::chrono::duration<double>(stamp - r36s_sample_start).count();
@@ -1156,7 +1202,8 @@ int main(int argc, char** argv) {
             r36s_sample_frames = 0;
             r36s_sample_start = stamp;
         }
-#endif
+#endif // !KI_R36S_RELEASE_CLEAN
+#endif // KI_R36S
         board.p1 = p1;
         board.p2 = p2;
 
