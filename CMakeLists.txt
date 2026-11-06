@@ -147,6 +147,10 @@ target_compile_definitions(mips_memory_fast_selftest PRIVATE KI_R36S_FAST_MEMORY
 target_link_libraries(mips_memory_fast_selftest PRIVATE ki_runtime)
 add_test(NAME mips_memory_fast_selftest COMMAND mips_memory_fast_selftest)
 
+add_executable(gles2_rgba_upload_selftest tests/gles2_rgba_upload_selftest.cpp tests/empty_function_table.cpp)
+target_link_libraries(gles2_rgba_upload_selftest PRIVATE ki_runtime)
+add_test(NAME gles2_rgba_upload_selftest COMMAND gles2_rgba_upload_selftest)
+
 add_executable(mips_idle_skip_selftest tests/mips_idle_skip_selftest.cpp tests/empty_function_table.cpp)
 target_link_libraries(mips_idle_skip_selftest PRIVATE ki_runtime)
 add_test(NAME mips_idle_skip_selftest COMMAND mips_idle_skip_selftest)
