@@ -2,9 +2,11 @@
 <gameList>
   <game>
     <path>./Killer Instinct Arcade.sh</path>
-    <name>Killer Instinct (Arcade - ki-recomp)</name>
-    <desc>Experimental ARM64 R36S port of kilnan's KI static recompilation. Original arcade game files required, not included. Port: dehalbuq.</desc>
-    <developer>Rare</developer><publisher>Midway</publisher>
-    <genre>Fighting</genre><players>1-2</players>
+    <name>Killer Instinct (Arcade - R36S ARM64)</name>
+    <desc>Independent experimental ARM64 R36S port of ki-recomp (kilnan), adapted by dehalbuq. Full 4:3 GLES2, NEON and Audio Smooth. Original game ROM and CHD required; not included. Read the legal notice before distributing the statically recompiled executable.</desc>
+    <developer>Rare</developer>
+    <publisher>Midway</publisher>
+    <genre>Fighting</genre>
+    <players>1-2</players>
   </game>
 </gameList>
