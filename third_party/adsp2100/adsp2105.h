@@ -77,6 +77,9 @@ public:
     // but every execution is guarded by its current program-memory word.
     void enable_native_opcodes(bool enabled) { m_native_opcode_enabled = enabled; }
     uint64_t native_opcode_count() const { return m_native_opcode_count; }
+    // ROM-free regression aid: compare guest-visible state, excluding host
+    // pointers and diagnostic counters. Never used during normal gameplay.
+    bool guest_state_equals(const Adsp2105& other) const;
     std::vector<std::pair<uint16_t, uint32_t>> take_pc_hotspots(
         std::size_t max_entries, uint32_t& sampled_instructions);
     // Interrupt input level (MAME execute_set_input semantics: a rising edge latches).
