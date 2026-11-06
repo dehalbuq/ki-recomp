@@ -23,6 +23,15 @@ A/B/R2 low attacks; Start begins game; Select/L1 inserts a coin.
 Hold Start+Select for 0.8s to open the pause/exit menu. Use up/down
 and A to choose RESUME or EXIT, B cancels. Mapping varies by firmware.
 
+**Startup credits and independent legal notice:** The first
+screen credits the original arcade, kilnan's ki-recomp, dehalbuq's
+R36S port and the open-source DSP/dependency authors; the second
+explicitly distinguishes lawful ROM/CHD ownership from redistribution
+rights for a compiled game-derived executable. All original
+commercial game rights remain with their holders. Both notices are
+shown **before opening ROM/CHD**; Start/A advances after a minimum
+reading time. SDL2 bitmap drawing only, zero cost during actual play.
+
 **Optimizations retained:** AArch64 Cortex-A35 -O3 static MIPS
 recompilation, physical RAM fast path and guarded IRQ idle skipping,
 MIPS indirect jump target cache, optimized ADSP2105 audio interpreter,
