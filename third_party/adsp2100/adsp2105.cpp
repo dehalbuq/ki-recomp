@@ -466,6 +466,125 @@ bool Adsp2105::try_ki_waitloop()
     return true;
 }
 
+// Experimental, ahead-of-time specialization of selected ADSP-2105
+// instruction families. The C++ compiler sees each 24-bit instruction as a
+// constant and can eliminate its opcode decode. These operations intentionally
+// reuse the same MAME-derived register, ALU/MAC, DAG and condition helpers as
+// the interpreter, preserving guest-visible side effects and cycle semantics.
+// Only verified opcode/PC pairs from a private ROM build enter this path.
+template<uint32_t Opcode>
+inline void Adsp2105::execute_native_opcode()
+{
+    constexpr uint32_t op = Opcode;
+    constexpr uint32_t g = (op >> 16) & 0xffu;
+    if constexpr (g == 0x0d) {
+        constexpr uint32_t sub = (op >> 8) & 15u;
+        constexpr int dst = (op >> 4) & 15u, src = op & 15u;
+        if constexpr (sub == 0) write_reg0(dst, read_reg0(src));
+        else if constexpr (sub == 1) write_reg0(dst, read_reg1(src));
+        else if constexpr (sub == 2) write_reg0(dst, read_reg2(src));
+        else if constexpr (sub == 3) write_reg0(dst, read_reg3(src));
+        else if constexpr (sub == 4) write_reg1(dst, read_reg0(src));
+        else if constexpr (sub == 5) write_reg1(dst, read_reg1(src));
+        else if constexpr (sub == 6) write_reg1(dst, read_reg2(src));
+        else if constexpr (sub == 7) write_reg1(dst, read_reg3(src));
+        else if constexpr (sub == 8) write_reg2(dst, read_reg0(src));
+        else if constexpr (sub == 9) write_reg2(dst, read_reg1(src));
+        else if constexpr (sub == 10) write_reg2(dst, read_reg2(src));
+        else if constexpr (sub == 11) write_reg2(dst, read_reg3(src));
+        else if constexpr (sub == 12) write_reg3(dst, read_reg0(src));
+        else if constexpr (sub == 13) write_reg3(dst, read_reg1(src));
+        else if constexpr (sub == 14) write_reg3(dst, read_reg2(src));
+        else write_reg3(dst, read_reg3(src));
+    } else if constexpr (g >= 0x18 && g <= 0x1b) {
+        if (condition(op & 15u)) {
+            m_pc = (op >> 4) & 0x3fffu;
+            if (m_pc == m_ppc) m_icount = 0; // MAME busy-loop behavior
+        }
+    } else if constexpr (g >= 0x20 && g <= 0x27) {
+        if (condition(op & 15u)) {
+            if constexpr (g == 0x20 || g == 0x21) {
+                if (m_chip_type >= CHIP_TYPE_ADSP2181 && (op & 0x0018f0u) == 0x000010u)
+                    mac_op_mr_xop(op);
+                else mac_op_mr(op);
+            } else if constexpr (g == 0x22 || g == 0x23) {
+                if (m_chip_type >= CHIP_TYPE_ADSP2181 && BIT(op, 4))
+                    alu_op_ar_const(op);
+                else alu_op_ar(op);
+            } else if constexpr (g == 0x24 || g == 0x25) {
+                if (m_chip_type >= CHIP_TYPE_ADSP2181 && (op & 0x0018f0u) == 0x000010u)
+                    mac_op_mf_xop(op);
+                else mac_op_mf(op);
+            } else {
+                if (m_chip_type >= CHIP_TYPE_ADSP2181 && BIT(op, 4))
+                    alu_op_af_const(op);
+                else alu_op_af(op);
+            }
+        }
+    } else if constexpr (g >= 0x30 && g <= 0x3f) {
+        constexpr int dst = op & 15u;
+        constexpr int32_t imm = sext(op >> 4, 14);
+        if constexpr (g <= 0x33) write_reg0(dst, imm);
+        else if constexpr (g <= 0x37) write_reg1(dst, imm);
+        else if constexpr (g <= 0x3b) write_reg2(dst, imm);
+        else write_reg3(dst, imm);
+    } else if constexpr (g >= 0x40 && g <= 0x4f) {
+        write_reg0(op & 15u, (op >> 4) & 0xffffu);
+    } else if constexpr (g >= 0x60 && g <= 0x7f) {
+        // The ADSP parallel MAC/ALU + DAG read/write instruction families
+        // MUST perform the two operations in their original execution order.
+        constexpr uint32_t sub = (g - 0x60u) >> 1;
+        if constexpr (sub >= 4 && sub <= 7) {
+            if constexpr ((sub & 1) == 0) {
+                data_write_dag1(op, read_reg0(BIT(op, 4, 4)));
+                if constexpr (sub == 4) mac_op_mr(op);
+                else mac_op_mf(op);
+            } else {
+                data_write_dag1(op, read_reg0(BIT(op, 4, 4)));
+                if constexpr (sub == 5) alu_op_ar(op);
+                else alu_op_af(op);
+            }
+        } else if constexpr (sub >= 12) {
+            data_write_dag2(op, read_reg0(BIT(op, 4, 4)));
+            if constexpr (sub == 12) mac_op_mr(op);
+            else if constexpr (sub == 13) alu_op_ar(op);
+            else if constexpr (sub == 14) mac_op_mf(op);
+            else alu_op_af(op);
+        } else {
+            if constexpr (sub == 0 || sub == 8) mac_op_mr(op);
+            else if constexpr (sub == 1 || sub == 9) alu_op_ar(op);
+            else if constexpr (sub == 2 || sub == 10) mac_op_mf(op);
+            else alu_op_af(op);
+            const uint32_t value = (sub < 8) ? data_read_dag1(op) : data_read_dag2(op);
+            write_reg0(BIT(op, 4, 4), value);
+        }
+    } else if constexpr (g >= 0x80 && g <= 0x9f) {
+        constexpr uint32_t addr = (op >> 4) & 0x3fffu;
+        constexpr int reg = op & 15u;
+        if constexpr (g <= 0x83) write_reg0(reg, data_read(addr));
+        else if constexpr (g <= 0x87) write_reg1(reg, data_read(addr));
+        else if constexpr (g <= 0x8b) write_reg2(reg, data_read(addr));
+        else if constexpr (g <= 0x8f) write_reg3(reg, data_read(addr));
+        else if constexpr (g <= 0x93) data_write(addr, read_reg0(reg));
+        else if constexpr (g <= 0x97) data_write(addr, read_reg1(reg));
+        else if constexpr (g <= 0x9b) data_write(addr, read_reg2(reg));
+        else data_write(addr, read_reg3(reg));
+    }
+}
+
+bool Adsp2105::try_native_opcode(uint32_t op)
+{
+#ifdef KI_ADSP_NATIVE_IMAGE
+    switch (m_ppc & 0x3fffu) {
+#include "ki_adsp_native.inc"
+    default: break;
+    }
+#else
+    (void)op;
+#endif
+    return false;
+}
+
 int Adsp2105::run(int cycles)
 {
 	if (m_in_reset)
@@ -529,6 +648,11 @@ int Adsp2105::run(int cycles)
 			}
 		}
 
+		// Try a privately generated native specialization only on an
+        // exact 24-bit opcode match; otherwise interpret this instruction.
+        // Off by default, so the normal release remains the known baseline.
+        if (!(m_native_opcode_enabled && !m_pc_profiler &&
+              try_native_opcode(op))) {
 		// parse the instruction
 		uint32_t temp;
 		switch (BIT(op, 16, 8))
@@ -1224,6 +1348,7 @@ int Adsp2105::run(int cycles)
 				m_core.my1.u = pgm_read_dag2(op >> 4);
 				break;
 		}
+        } // fallback interpreter
 
 		m_icount--;
 	} while (m_icount > 0);
