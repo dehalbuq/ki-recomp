@@ -100,7 +100,7 @@ inline int text_width(const char* s, int scale) {
     return static_cast<int>(std::strlen(s)) * 6 * scale;
 }
 inline bool layout_valid() {
-    for (const auto& list : {0,1}) {
+    for (int list=0; list<2; ++list) {
         const Line* lines = list == 0 ? kCredits : kLegal;
         const size_t count = list == 0 ? credits_count() : legal_count();
         for (size_t i = 0; i<count; ++i) {
