@@ -54,12 +54,20 @@ inline size_t dispatch_slot(uint32_t addr) {
     return ((addr >> 2) ^ (addr >> 10)) & (kDispatchCacheSlots - 1);
 }
 bool fast_dispatch_enabled() {
+#ifdef KI_R36S_RELEASE_CLEAN
+    return true;
+#else
     static const bool enabled = std::getenv("KI_R36S_DISPATCH_BASELINE") == nullptr;
     return enabled;
+#endif
 }
 bool dispatch_profile_enabled() {
+#ifdef KI_R36S_RELEASE_CLEAN
+    return false;
+#else
     static const bool enabled = std::getenv("KI_R36S_DISPATCH_PROFILE") != nullptr;
     return enabled;
+#endif
 }
 #endif
 
