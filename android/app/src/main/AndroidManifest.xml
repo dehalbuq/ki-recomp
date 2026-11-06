@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-feature android:glEsVersion="0x00020000" android:required="true" />
+  <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+  <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+  <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+  <application android:allowBackup="false" android:label="Killer Instinct Arcade (Test)" android:hasCode="true" android:hardwareAccelerated="true" android:theme="@android:style/Theme.Holo.NoActionBar.Fullscreen">
+    <activity android:name=".BootstrapActivity" android:exported="true" android:screenOrientation="landscape">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+    <activity android:name=".KIActivity" android:exported="false" android:screenOrientation="landscape" android:alwaysRetainTaskState="true"
+      android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation" >
+      <meta-data android:name="SDL_ENV.SDL_RENDER_DRIVER" android:value="opengles2" />
+      <meta-data android:name="SDL_ENV.SDL_RENDER_SCALE_QUALITY" android:value="0" />
+    </activity>
+  </application>
+</manifest>

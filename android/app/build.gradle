@@ -1,0 +1,43 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'br.com.dehalbuq.kiandroid'
+    compileSdk 34
+    ndkVersion '25.2.9519653'  // NDK r25c, last to support API 19
+
+    defaultConfig {
+        applicationId 'br.com.dehalbuq.kiandroid'
+        minSdk 19
+        targetSdk 28
+        versionCode 1
+        versionName '0.1-armv7-test'
+        ndk { abiFilters 'armeabi-v7a' }
+        externalNativeBuild {
+            cmake {
+                arguments '-DKI_ANDROID=ON', '-DKI_BUILD_FULL=ON', '-DKI_WITH_CHD=ON',
+                          '-DANDROID_STL=c++_shared', '-DKI_SPLIT=16'
+                targets 'main'
+                cppFlags '-std=c++20'
+            }
+        }
+    }
+    buildTypes {
+        debug { debuggable true }
+        release {
+            minifyEnabled false
+            // For privately distributed test APKs only. Not a production signing key.
+            signingConfig signingConfigs.debug
+        }
+    }
+    externalNativeBuild {
+        cmake { path '../../CMakeLists.txt'; version '3.22.1' }
+    }
+    sourceSets {
+        main {
+            // Pair the SDL2 Android Java glue with the exact SDL2 native source tag.
+            java.srcDir '../../third_party/SDL/android-project/app/src/main/java'
+        }
+    }
+    androidResources { noCompress += ['chd', 'zip'] }
+    packaging { jniLibs { useLegacyPackaging true } }
+}

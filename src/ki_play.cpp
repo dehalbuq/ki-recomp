@@ -190,6 +190,13 @@ int main(int argc, char** argv) {
         }
     }
     ki::install_fight_choice(&fight);
+#ifdef KI_ANDROID
+    // SDL2 Android always creates a native GLES surface; keep native 4:3.
+    scale = 2;
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
+#endif
 #ifdef KI_R36S
     // Exact 320x240 -> 640x480 scaling, without changing the guest frame rate.
     scale = 2;
@@ -277,6 +284,9 @@ int main(int argc, char** argv) {
 #ifdef KI_R36S
     window_flags = SDL_WINDOW_FULLSCREEN_DESKTOP;
 #endif
+#ifdef KI_ANDROID
+    window_flags = SDL_WINDOW_FULLSCREEN_DESKTOP;
+#endif
     SDL_Window* window = SDL_CreateWindow(kTitle, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 320 * scale,
                                           240 * scale, window_flags);
     if (!window) {
@@ -319,15 +329,17 @@ int main(int argc, char** argv) {
     bool wide = read_text(pref_path() + "aspect.txt") == "16:9";
     if (!aspect_arg.empty()) wide = aspect_arg == "16:9";
     auto set_aspect = [&](bool w) {
-#ifdef KI_R36S
-        w = false; // physical R36S panel is 4:3
+#if defined(KI_R36S) || defined(KI_ANDROID)
+        w = false; // physical R36S panel and Android APK are 4:3
 #endif
         wide = w;
         SDL_RenderSetLogicalSize(renderer, wide ? kWideW : 320, 240);
         int ww = 0, wh = 0;
         SDL_GetWindowSize(window, &ww, &wh);
+#ifndef KI_ANDROID
         if (!(SDL_GetWindowFlags(window) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_MAXIMIZED)))
             SDL_SetWindowSize(window, wh * (wide ? kWideW : 320) / 240, wh);
+#endif
         write_text(pref_path() + "aspect.txt", wide ? "16:9" : "4:3");
     };
     set_aspect(wide);
@@ -382,6 +394,9 @@ int main(int argc, char** argv) {
         r36s_direct_texture ? "SDL_LockTexture direct" : "SDL_UpdateTexture");
 #endif
 #endif
+#ifdef KI_ANDROID
+    SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
+#endif
     SDL_Texture* hd_texture = nullptr;  // 4x picture when an HD pack is loaded (H toggles)
 
     // ---- R36S independent-port attribution and legal notice ----
@@ -431,6 +446,13 @@ int main(int argc, char** argv) {
         std::string error;
         bool ok = !data.empty() && ki::load_game_files(data, files, error, prefs);
         if (!ok) {
+#ifdef KI_ANDROID
+            std::string error_text = data.empty() ? "Data directory not provided" : error;
+            std::fprintf(stderr, "[android] Game data error: %s\n", error_text.c_str());
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, kTitle, error_text.c_str(), window);
+            SDL_Quit();
+            return 3;
+#endif
             std::string msg =
                 (data.empty() ? std::string("Drag the folder with your MAME 'kinst' set onto this window.")
                               : "The game files in " + data + " cannot be used:\n" + error +
@@ -650,6 +672,16 @@ int main(int argc, char** argv) {
     // Preallocated (resized once) and reused: no per-frame GPU staging alloc.
     std::vector<uint32_t> r36s_frame_rgba;
     if (r36s_fast_rgba) r36s_frame_rgba.reserve(320 * 240);
+#endif
+#ifdef KI_ANDROID
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+        if (SDL_IsGameController(i)) {
+            if (SDL_GameController* controller = SDL_GameControllerOpen(i)) {
+                pads.push_back(controller);
+                std::fprintf(stderr, "[android] Gamepad detected: %s\n", SDL_GameControllerName(controller));
+            }
+        }
+    }
 #endif
     uint64_t saved_writes = 0;
     uint64_t title_reset_frame = 0;

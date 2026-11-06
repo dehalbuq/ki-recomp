@@ -12,3 +12,10 @@ __pycache__/
 /poc/out/
 deps-macos/
 dist/
+
+# Android source checkout and build products (never stage private game assets)
+/third_party/SDL/
+/android/.gradle/
+/android/app/.cxx/
+/android/app/build/
+/android/app/src/main/assets/kinst/
