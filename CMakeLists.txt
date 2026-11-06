@@ -65,7 +65,7 @@ target_link_libraries(ki_runtime PUBLIC adsp2105)
 if(KI_R36S)
   # Only handheld builds enable KI-specific DSP polling acceleration by
   # default. Other platforms keep the interpreter until validated.
-  target_compile_definitions(ki_runtime PRIVATE KI_R36S_FAST_DSP=1)
+  target_compile_definitions(ki_runtime PRIVATE KI_R36S_FAST_DSP=1 KI_R36S_FAST_DISPATCH=1)
 endif()
 
 # A recompiled-code library defines the function table (ki::kFunctionTable) that
@@ -150,6 +150,15 @@ add_test(NAME mips_memory_fast_selftest COMMAND mips_memory_fast_selftest)
 add_executable(gles2_rgba_upload_selftest tests/gles2_rgba_upload_selftest.cpp tests/empty_function_table.cpp)
 target_link_libraries(gles2_rgba_upload_selftest PRIVATE ki_runtime)
 add_test(NAME gles2_rgba_upload_selftest COMMAND gles2_rgba_upload_selftest)
+
+if(KI_R36S)
+  add_executable(dispatch_cache_selftest tests/dispatch_cache_selftest.cpp)
+  target_link_libraries(dispatch_cache_selftest PRIVATE ki_runtime)
+  add_test(NAME dispatch_cache_selftest COMMAND dispatch_cache_selftest)
+  add_test(NAME dispatch_cache_baseline_selftest COMMAND dispatch_cache_selftest)
+  set_tests_properties(dispatch_cache_baseline_selftest PROPERTIES
+      ENVIRONMENT "KI_R36S_DISPATCH_BASELINE=1")
+endif()
 
 add_executable(mips_idle_skip_selftest tests/mips_idle_skip_selftest.cpp tests/empty_function_table.cpp)
 target_link_libraries(mips_idle_skip_selftest PRIVATE ki_runtime)
