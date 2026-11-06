@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <array>
+#include <cstdlib>
 
 namespace ki {
 
@@ -28,6 +30,39 @@ namespace {
 const FuncEntry* boot_table = nullptr;
 std::size_t boot_table_size = 0;
 
+// Test20: the static recompiled function table never changes after it is
+// generated. Cache only successful indirect MIPS targets, bypassing the
+// repeated binary search for common jalr/jr targets. The boot ROM table can
+// change at reset, so any change must invalidate the current thread's cache.
+// CPU/guest registers, return behavior, emulator cycles and interrupt state
+// are untouched. One thread runs the MIPS CPU; thread_local avoids races if
+// future ports add other host threads.
+#ifdef KI_R36S_FAST_DISPATCH
+constexpr size_t kDispatchCacheSlots = 256;
+struct DispatchCacheEntry {
+    uint32_t address = 0;
+    RecompFunc fn = nullptr;
+};
+struct DispatchCache {
+    std::array<DispatchCacheEntry, kDispatchCacheSlots> entries{};
+    uint64_t hits = 0, misses = 0;
+};
+thread_local DispatchCache dispatch_cache;
+inline size_t dispatch_slot(uint32_t addr) {
+    // Code addresses are 4-byte aligned. XOR spreads different functions
+    // even when they reside in the same 1KiB neighborhood.
+    return ((addr >> 2) ^ (addr >> 10)) & (kDispatchCacheSlots - 1);
+}
+bool fast_dispatch_enabled() {
+    static const bool enabled = std::getenv("KI_R36S_DISPATCH_BASELINE") == nullptr;
+    return enabled;
+}
+bool dispatch_profile_enabled() {
+    static const bool enabled = std::getenv("KI_R36S_DISPATCH_PROFILE") != nullptr;
+    return enabled;
+}
+#endif
+
 RecompFunc find(const FuncEntry* table, std::size_t size, uint32_t vaddr) {
     const FuncEntry* end = table + size;
     const FuncEntry* it =
@@ -39,13 +74,46 @@ RecompFunc find(const FuncEntry* table, std::size_t size, uint32_t vaddr) {
 void set_boot_function_table(const FuncEntry* table, std::size_t size) {
     boot_table = table;
     boot_table_size = size;
+#ifdef KI_R36S_FAST_DISPATCH
+    // Also invalidates cached negative/positive boot aliases.
+    dispatch_cache.entries = {};
+#endif
+}
+
+DispatchStats dispatch_cache_take_stats() {
+#ifdef KI_R36S_FAST_DISPATCH
+    DispatchStats stats{dispatch_cache.hits, dispatch_cache.misses};
+    dispatch_cache.hits = dispatch_cache.misses = 0;
+    return stats;
+#else
+    return {};
+#endif
 }
 
 RecompFunc lookup_function(uint32_t vaddr) {
-    if (RecompFunc fn = find(kFunctionTable, kFunctionTableSize, vaddr)) return fn;
-    if (!boot_table) return nullptr;
-    if ((vaddr & 0xfff00000u) == 0x9fc00000u) vaddr |= 0x20000000u;  // KSEG0 view of the EPROM
-    return find(boot_table, boot_table_size, vaddr);
+#ifdef KI_R36S_FAST_DISPATCH
+    const bool fast = fast_dispatch_enabled();
+    // Keep original target (including 9fc... boot alias) as the cache key.
+    // Only a verified successful address->function association is cached.
+    const size_t slot = dispatch_slot(vaddr);
+    const auto& cached = dispatch_cache.entries[slot];
+    if (fast && cached.fn && cached.address == vaddr) {
+        if (dispatch_profile_enabled()) ++dispatch_cache.hits;
+        return cached.fn;
+    }
+    if (dispatch_profile_enabled()) ++dispatch_cache.misses;
+#endif
+    RecompFunc fn = find(kFunctionTable, kFunctionTableSize, vaddr);
+    if (!fn && boot_table) {
+        uint32_t boot_addr = vaddr;
+        if ((boot_addr & 0xfff00000u) == 0x9fc00000u)
+            boot_addr |= 0x20000000u;  // KSEG0 view of the EPROM
+        fn = find(boot_table, boot_table_size, boot_addr);
+    }
+#ifdef KI_R36S_FAST_DISPATCH
+    if (fast && fn) dispatch_cache.entries[slot] = {vaddr, fn};
+#endif
+    return fn;
 }
 
 void call_indirect(Context& c, uint32_t target, uint32_t pc) {
