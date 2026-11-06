@@ -39,6 +39,7 @@ args+=("-DKI_R36S_MIPS_O3=$MIPS_O3")
 RELEASE_CLEAN="${KI_R36S_RELEASE_CLEAN:-OFF}"
 case "$RELEASE_CLEAN" in ON|OFF) ;; *) echo "KI_R36S_RELEASE_CLEAN must be ON or OFF" >&2; exit 2;; esac
 args+=("-DKI_R36S_RELEASE_CLEAN=$RELEASE_CLEAN")
+args+=("-DKI_R36S_LEGACY_SDL_ABI=${KI_R36S_LEGACY_SDL_ABI:-OFF}")
 echo "R36S build: folder=$BUILD_FOLDER, type=${KI_BUILD_TYPE:-Debug}, generated MIPS O3=$MIPS_O3, clean release=$RELEASE_CLEAN"
 
 
