@@ -38,6 +38,34 @@ PortMaster submission or a finished full-campaign certification.
 | Clean v0.1.0 candidate | Release/O3 build, no per-frame profiling, no diagnostic launcher, stripped symbols | ARM64 Release build and ROM-free package verification passed; still needs final hardware regression |
 | Next release candidate | Two startup screens: project/third-party credits and honest legal notice | Source tests validate screen layout; actual firmware test should check readability and skip controls |
 
+## Dual AArch64 build — automated ArkOS4Clone selection
+
+A private GitHub Actions run
+[completed successfully](https://github.com/dehalbuq/ki-recomp-build-private/actions/runs/42238929556)
+with two separately compiled executables in one PortMaster package.
+The launcher chooses by native `getconf GNU_LIBC_VERSION`:
+
+- **dArkOSRE:** `ki_play.aarch64` when GLIBC >=2.38,
+  with a measured executable requirement of GLIBC **2.38**.
+- **ArkOS4Clone:** `ki_play.glibc230.aarch64` when GLIBC
+  2.28–2.37; its measured maximum required GLIBC symbol is **2.17**.
+  The legacy build uses manylinux_2_28 ARM64 GCC14 and bundles a
+  matching SDL2 with KMSDRM/OpenGLES2, libstdc++ and libgcc_s
+  under `libs.glibc230`. Those libraries require at most GLIBC **2.27**.
+- Versions below 2.28 or unknown GLIBC fail safely without invoking an
+  incompatible binary. No system GLIBC or GPU drivers are bundled.
+
+Both ELF files include the source credits/legal splash, clean Release
+optimizations, original guest timing and WSOLA sound. The ZIP is ROM-free.
+A synthetic `bash tests/r36s_dual_abi_launcher_selftest.sh` verifies
+the selector against firmware GLIBC values 2.28–2.39 and missing-file
+failure paths.
+
+**Limit:** ABI symbols, packaging and CI builds were validated. This
+does **not** prove game launch, SDL2/KMSDRM rendering, sound, controls,
+or save behavior on actual ArkOS4Clone hardware. A user/device test
+is required before claiming compatible gameplay.
+
 ## Observed R36S performance
 
 Reference: the user's full **Test21** R36S log on **dArkOSRE**
