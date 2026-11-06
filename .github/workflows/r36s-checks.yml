@@ -55,6 +55,10 @@ jobs:
       - name: Compile R36S SDL player translation units (syntax-only)
         run: |
           c++ -std=c++20 -fsyntax-only -DKI_R36S=1 -Iruntime/include -Ithird_party/adsp2100 -Isrc $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
+      - name: Syntax-check optimized clean Release without runtime probes
+        run: |
+          c++ -std=c++20 -O3 -DNDEBUG -fsyntax-only             -DKI_R36S=1 -DKI_R36S_RELEASE_CLEAN=1             -Iruntime/include -Ithird_party/adsp2100 -Isrc             $(sdl2-config --cflags) src/ki_play.cpp src/ki_pad.cpp src/ki_pad_ui.cpp
+          c++ -std=c++20 -O3 -DNDEBUG -fsyntax-only             -DKI_R36S_FAST_DISPATCH=1 -DKI_R36S_RELEASE_CLEAN=1             -Iruntime/include -Ithird_party/adsp2100 runtime/src/runtime.cpp
       - name: Check launchers, build scripts and metadata
         run: |
           bash -n tools/r36s/build.sh tools/r36s/diagnose.sh
@@ -103,4 +107,17 @@ jobs:
                              n.lower().endswith("/kinst.zip") for n in names)
               assert z.testzip() is None
           print("ROM-free Test20 two-launcher package smoke test OK")
+          PY
+      - name: Validate v0.1.0 clean release packaging and no diagnostic launcher
+        run: |
+          python3 tools/r36s/package_port.py /tmp/ki-romfree-elf             --release --output /tmp/ki-release-smoke.zip
+          python3 - <<'PY'
+          from zipfile import ZipFile
+          with ZipFile("/tmp/ki-release-smoke.zip") as z:
+              scripts={p for p in z.namelist() if p.endswith(".sh")}
+              assert scripts=={"Killer Instinct Arcade.sh"},scripts
+              assert b"v0.1.0" in z.read("README.md")
+              assert "killerinstinct/ki_play.aarch64" in z.namelist()
+              assert z.testzip() is None
+          print("ROM-free clean release package smoke: OK")
           PY
