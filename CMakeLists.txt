@@ -164,6 +164,9 @@ if(KI_R36S AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_executable(gfx_profile_selftest tests/gfx_profile_selftest.cpp)
   target_compile_definitions(gfx_profile_selftest PRIVATE KI_R36S_GFX_PROFILE_SUPPORTED=1)
   add_test(NAME gfx_profile_selftest COMMAND gfx_profile_selftest)
+  # Building the graphics test suite must also materialize the newer
+  # GLES2 RGB555/RGBA differential test before ctest --test-dir.
+  add_dependencies(gfx_profile_selftest gles2_rgba_upload_selftest)
 endif()
 file(GLOB _cases LIST_DIRECTORIES true "${CMAKE_SOURCE_DIR}/traces/poc/*")
 foreach(case_dir IN LISTS _cases)
