@@ -35,6 +35,28 @@ cinco segundos. A meta do arcade original é aproximadamente 58,98
 FPS. A nova compilação limpa com splash ainda precisa ser validada
 fisicamente antes da homologação.
 
+## Duas versões ARM64 selecionadas automaticamente
+
+O pacote dual inclui um executável para **dArkOSRE** e outro
+compilado com dependências mais antigas para **ArkOS4Clone**.
+Não é preciso trocar arquivos manualmente: ao iniciar o jogo, o
+script verifica a versão da `glibc` presente no firmware.
+
+| glibc encontrada | Versão iniciada |
+|---|---|
+| 2.38 ou superior | `ki_play.aarch64` (moderna/dArkOSRE) |
+| 2.28 a 2.37 | `ki_play.glibc230.aarch64` (legada/ArkOS4Clone) |
+| Inferior a 2.28 ou desconhecida | Mensagem de incompatibilidade, sem iniciar |
+
+A versão ArkOS4Clone usa `libs.glibc230/`, com SDL2 e
+bibliotecas C++ compiladas para uma ABI antiga. **Não inclui
+nem substitui a glibc, o carregador ELF, o driver Mali, EGL ou GBM
+do sistema.** A presença dos arquivos e a aprovação do teste de
+ABI não são confirmação de funcionamento: é necessário testar
+inicialização, controles, áudio, vídeo e saves no ArkOS4Clone real.
+
+Mais detalhes estão no [guia de compilação dual](R36S_PORT.md).
+
 ## Como instalar (teste pessoal)
 
 1. Faça backup do conteúdo de `roms/ports/killerinstinct/` e dos saves.
