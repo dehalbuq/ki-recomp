@@ -15,6 +15,7 @@ p = argparse.ArgumentParser()
 p.add_argument("binary", type=Path, help="Path to build-r36s/ki_play")
 p.add_argument("--output", type=Path, default=ROOT / "killerinstinct-r36s-prototype.zip")
 p.add_argument("--libs", type=Path, help="Firmware-compatible non-glibc library directory")
+p.add_argument("--release", action="store_true", help="Lean first release, only game launcher; no diagnostics/scripts")
 args = p.parse_args()
 
 if not args.binary.is_file():
@@ -35,7 +36,11 @@ with tempfile.TemporaryDirectory(prefix="ki-r36s-port-") as td:
     dest = Path(td)
     for entry in template.iterdir():
         if entry.is_file():
+            if args.release and entry.suffix == ".sh" and entry.name != "Killer Instinct Arcade.sh":
+                continue
             shutil.copy2(entry, dest / entry.name)
+    if args.release:
+        shutil.copy2(HERE / "RELEASE_README.md", dest / "README.md")
     folder = dest / "killerinstinct"
     (folder / "gamedata").mkdir(parents=True)
     (folder / "logs").mkdir()
@@ -58,4 +63,4 @@ with tempfile.TemporaryDirectory(prefix="ki-r36s-port-") as td:
         for file in sorted(dest.rglob("*")):
             if file.is_file():
                 z.write(file, str(file.relative_to(dest)))
-print(f"Created prototype (no ROMs): {args.output}")
+print(f"Created {'v0.1.0 clean release' if args.release else 'prototype'} (no ROMs): {args.output}")
