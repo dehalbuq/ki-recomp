@@ -1013,6 +1013,17 @@ int main(int argc, char** argv) {
                 r36s_render_ms / render_div, r36s_rgb_ms / render_div, r36s_swap_ms / render_div,
                 r36s_present_frames, static_cast<double>(read_delta) / (1024.0 * 1024.0),
                 r36s_rss_kib() / 1024.0, r36s_cpu_khz());
+            if (std::getenv("KI_R36S_DISPATCH_PROFILE")) {
+                const auto counts = ki::dispatch_cache_take_stats();
+                const uint64_t total_calls = counts.hits + counts.misses;
+                std::fprintf(stderr,
+                    "[r36s] MIPS_DISPATCH lookups=%llu cache_hits=%llu misses=%llu hit_rate=%.1f%% baseline=%d\n",
+                    static_cast<unsigned long long>(total_calls),
+                    static_cast<unsigned long long>(counts.hits),
+                    static_cast<unsigned long long>(counts.misses),
+                    total_calls ? 100.0 * counts.hits / total_calls : 0.0,
+                    std::getenv("KI_R36S_DISPATCH_BASELINE") ? 1 : 0);
+            }
             if (r36s_host_profile)
                 ki_r36s::host_profiler::report(r36s_sample_frames);
             ki_r36s::gfx_profiler::report(r36s_sample_frames);
