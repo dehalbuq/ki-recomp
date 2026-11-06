@@ -78,6 +78,22 @@ jobs:
           assert "KI_R36S_GLES2_RGBA=1" in original and "unset KI_R36S_AUDIO_SMOOTH" in original
           assert "KI_R36S_GLES2_RGBA=1" in smooth and "KI_R36S_AUDIO_SMOOTH=1" in smooth
           print("PortMaster Test18 A/B launcher metadata: OK")
+          test19 = (
+              "KI R36S - Test19 NEON Update.sh",
+              "KI R36S - Test19 NEON Locked.sh",
+              "KI R36S - Test19 Scalar Locked.sh",
+              "KI R36S - Test19 NEON NoClear.sh",
+          )
+          for entry in test19:
+              script = (p / entry).read_text()
+              assert "KI_R36S_GPU_PROFILE=1" in script, entry
+              assert "KI_R36S_AUDIO_SMOOTH=1" in script, entry
+              assert "KI_R36S_GLES2_RGBA=1" in script, entry
+          assert "KI_R36S_DIRECT_TEXTURE=1" not in (p / test19[0]).read_text()
+          assert "KI_R36S_DIRECT_TEXTURE=1" in (p / test19[1]).read_text()
+          assert "KI_R36S_RGBA_SCALAR=1" in (p / test19[2]).read_text()
+          assert "KI_R36S_NO_CLEAR=1" in (p / test19[3]).read_text()
+          print("PortMaster Test19 independent RK3326 A/B launchers: OK")
           PY
       - name: Test Test18 ZIP packaging with synthetic AArch64 ELF (not a game)
         run: |
@@ -89,7 +105,11 @@ jobs:
               names = set(z.namelist())
               for entry in ("killerinstinct/ki_play.aarch64",
                             "KI R36S - RGBA Audio Original.sh",
-                            "KI R36S - RGBA Audio Smooth.sh"):
+                            "KI R36S - RGBA Audio Smooth.sh",
+                            "KI R36S - Test19 NEON Update.sh",
+                            "KI R36S - Test19 NEON Locked.sh",
+                            "KI R36S - Test19 Scalar Locked.sh",
+                            "KI R36S - Test19 NEON NoClear.sh"):
                   assert entry in names, f"Missing from package: {entry}"
               assert not any(n.endswith((".chd", ".bin", ".u98")) or
                              n.lower().endswith("/kinst.zip") for n in names)
