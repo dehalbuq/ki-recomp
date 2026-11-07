@@ -65,6 +65,7 @@
 #endif
 #ifdef KI_ANDROID
 #include <android/log.h>
+#include "ki_android_gamepad.h"
 #endif
 #ifdef KI_HAVE_FILES
 #include "ki_files.h"
@@ -270,6 +271,11 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
+#ifdef KI_ANDROID
+    // Chanuo A1 iPega PG-9068 HID D-pad is buttons 11..14; the IR remote
+    // must not occupy a player slot even if SDL advertises it as a controller.
+    ki_android::add_chanuo_mapping();
+#endif
 #ifdef KI_R36S
     {
         SDL_version runtime_sdl{};
@@ -712,14 +718,10 @@ int main(int argc, char** argv) {
     if (r36s_fast_rgba) r36s_frame_rgba.reserve(320 * 240);
 #endif
 #ifdef KI_ANDROID
-    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
-        if (SDL_IsGameController(i)) {
-            if (SDL_GameController* controller = SDL_GameControllerOpen(i)) {
-                pads.push_back(controller);
-                std::fprintf(stderr, "[android] Gamepad detected: %s\n", SDL_GameControllerName(controller));
-            }
-        }
-    }
+    // Unlike Android's SDL index order, physical sorting excludes the
+    // gpio_ir_recv / virtual-search remote devices and allows raw joysticks.
+    ki_android::PhysicalGamepads android_pads;
+    android_pads.poll(pads);
 #endif
     uint64_t saved_writes = 0;
     uint64_t title_reset_frame = 0;
@@ -979,6 +981,14 @@ int main(int argc, char** argv) {
                 next_frame = std::chrono::steady_clock::now();
             }
             while (SDL_PollEvent(&ev)) {
+#ifdef KI_ANDROID
+                if (ev.type == SDL_CONTROLLERDEVICEADDED ||
+                    ev.type == SDL_CONTROLLERDEVICEREMOVED ||
+                    ev.type == SDL_JOYDEVICEADDED ||
+                    ev.type == SDL_JOYDEVICEREMOVED ||
+                    ev.type == SDL_APP_DIDENTERFOREGROUND)
+                    android_pads.on_device_change();
+#endif
 #ifdef KI_R36S
                 if (ev.type == SDL_JOYDEVICEADDED) open_raw(ev.jdevice.which);
                 if (ev.type == SDL_JOYDEVICEREMOVED) {
@@ -1145,6 +1155,7 @@ int main(int argc, char** argv) {
                     state.request(ctx);  // taken at the next dispatcher entry
                 if (ev.type == SDL_KEYDOWN && !ev.key.repeat && ev.key.keysym.scancode == SDL_SCANCODE_F9 && state.valid())
                     throw ki::LoadStateRequest{};
+#ifndef KI_ANDROID
                 if (ev.type == SDL_CONTROLLERDEVICEADDED) {
                     SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(ev.cdevice.which);
                     bool already_open = false;
@@ -1162,7 +1173,11 @@ int main(int argc, char** argv) {
                         }
                     pads.erase(std::remove(pads.begin(), pads.end(), nullptr), pads.end());
                 }
+#endif // !KI_ANDROID (physical selector owns Android controller handles)
             }
+#ifdef KI_ANDROID
+            android_pads.poll(pads);
+#endif
         }
         if (frame % 600 == 0) save();  // every ~10 s, if the game wrote anything
         if (state.just_saved()) {
@@ -1177,9 +1192,24 @@ int main(int argc, char** argv) {
         uint32_t p1 = 0xffffffff, p2 = 0xffffffff;
         for (const KeyBit& k : kKeys)
             if (keys[k.key]) (k.player == 1 ? p1 : p2) &= ~k.bit;
+#ifdef KI_ANDROID
+        // Poll raw state EVERY frame. Some Mediatek Android TV builds forward
+        // controller events to their IR remote while hiding PG-9068 button
+        // events. PG-9068 is read directly using known 19-button HID layout.
+        p1 &= ~android_pads.pressed(0, pad_actions);
+        p2 &= ~android_pads.pressed(1, pad_actions);
+        if (frame % 300 == 0) {
+            __android_log_print(ANDROID_LOG_INFO, "KI-Gamepad",
+                                "frame=%llu p1=%03x p2=%03x (active-low bits)",
+                                static_cast<unsigned long long>(frame),
+                                static_cast<unsigned>(~p1 & 0x1fffu),
+                                static_cast<unsigned>(~p2 & 0x1fffu));
+        }
+#else
         int player = 0;
         for (SDL_GameController* pad : pads)
             if (pad && SDL_GameControllerGetAttached(pad) && player < 2) (player++ == 0 ? p1 : p2) &= ~ki::pad::pressed(pad, pad_actions);
+#endif
 #ifdef KI_R36S
         // Hold Start+Select for 800ms to open an actual on-screen exit menu.
         // Read raw R36S buttons (Select=12, Start=13) even if SDL has no
