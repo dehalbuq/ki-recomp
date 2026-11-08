@@ -158,6 +158,11 @@ class PhysicalGamepads {
     }
 public:
     ~PhysicalGamepads() { close_all(); }
+    bool has_any() const {
+        for (const Entry& entry : entries_)
+            if (entry.raw && SDL_JoystickGetAttached(entry.raw)) return true;
+        return false;
+    }
     void on_device_change() { dirty_ = true; }
 
     void poll(std::vector<SDL_GameController*>& for_setup) {
