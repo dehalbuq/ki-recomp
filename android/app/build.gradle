@@ -9,9 +9,11 @@ android {
         applicationId 'br.com.dehalbuq.kiandroid'
         minSdk 19
         targetSdk 28
-        versionCode 3
-        versionName '0.3-armv7-chanuo-gamepad'
-        ndk { abiFilters 'armeabi-v7a' }
+        versionCode 4
+        versionName '0.4-android-tv-universal'
+        // Universal TV APK: 32-bit boxes/projectors and ARM64-only Android TV devices.
+        // ARM64 uses the NDK's minimum supported API 21; ARMv7 remains API 19.
+        ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }
         externalNativeBuild {
             cmake {
                 arguments '-DKI_ANDROID=ON', '-DKI_BUILD_FULL=ON', '-DKI_WITH_CHD=ON',
