@@ -66,6 +66,7 @@
 #ifdef KI_ANDROID
 #include <android/log.h>
 #include "ki_android_gamepad.h"
+#include "ki_android_touch.h"
 #endif
 #ifdef KI_HAVE_FILES
 #include "ki_files.h"
@@ -193,9 +194,15 @@ int main(int argc, char** argv) {
     std::string aspect_arg;
     int scale = 3;
     bool mute = false;
+#ifdef KI_ANDROID
+    bool android_touch_enabled = false;
+#endif
     for (int i = 1; i < argc; ++i) {
         std::string k = argv[i];
         if (k == "--mute") { mute = true; continue; }
+#ifdef KI_ANDROID
+        if (k == "--touchscreen") { android_touch_enabled = true; continue; }
+#endif
         if (i + 1 >= argc) break;
         std::string v = argv[++i];
         if (k == "--boot") boot = v;
@@ -221,6 +228,7 @@ int main(int argc, char** argv) {
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight Portrait PortraitUpsideDown");
     // The reference PCM sink stays available as an A/B fallback.
     const bool android_audio_smooth = std::getenv("KI_ANDROID_AUDIO_ORIGINAL") == nullptr;
 #endif
@@ -667,6 +675,11 @@ int main(int argc, char** argv) {
     state.bind(board, dcs.get(), sound);
 
     bool turbo = false;
+#ifdef KI_ANDROID
+    ki_android::TouchControls android_touch(android_touch_enabled);
+    Uint32 android_exit_confirm_until = 0;
+    Uint32 android_last_back_ms = 0;
+#endif
     std::vector<SDL_GameController*> pads;  // opened as SDL reports them (SDL_CONTROLLERDEVICEADDED)
 #ifdef KI_R36S
     // Some DarkOSre builds expose the internal pad as a raw joystick rather
@@ -816,7 +829,9 @@ int main(int argc, char** argv) {
         auto rgb = board.framebuffer_rgb(ctx);
 #endif
 #ifdef KI_ANDROID
-        const SDL_FRect game = android_centered_game_rect(renderer);
+        const SDL_FRect game = android_touch.enabled()
+            ? android_touch.game_rect(renderer)
+            : android_centered_game_rect(renderer);
         // Record output changes without per-frame log spam, for TV diagnosis.
         static int last_output_w = -1, last_output_h = -1;
         int output_w = 0, output_h = 0;
@@ -967,6 +982,10 @@ int main(int argc, char** argv) {
         pad_setup.draw(renderer, pads);
         SDL_RenderSetScale(renderer, 1.0f, 1.0f);
         SDL_RenderSetViewport(renderer, nullptr);
+        android_touch.draw(renderer);
+        if (android_exit_confirm_until &&
+            !SDL_TICKS_PASSED(SDL_GetTicks(), android_exit_confirm_until))
+            android_touch.draw_exit_confirmation(renderer);
 #else
         SDL_Rect area{static_cast<int>(game.x), 0, 320, 240};
         SDL_RenderSetViewport(renderer, &area);
@@ -1043,6 +1062,7 @@ int main(int argc, char** argv) {
             }
             while (SDL_PollEvent(&ev)) {
 #ifdef KI_ANDROID
+                android_touch.process(ev, renderer);
                 if (ev.type == SDL_CONTROLLERDEVICEADDED ||
                     ev.type == SDL_CONTROLLERDEVICEREMOVED ||
                     ev.type == SDL_JOYDEVICEADDED ||
@@ -1131,16 +1151,42 @@ int main(int argc, char** argv) {
                     pad_setup.toggle();
                     continue;
                 }
-                if (ev.type == SDL_QUIT || (ev.type == SDL_KEYDOWN &&
-                    (ev.key.keysym.scancode == SDL_SCANCODE_ESCAPE
 #ifdef KI_ANDROID
-                     || ev.key.keysym.scancode == SDL_SCANCODE_AC_BACK
-#endif
-                     ))) {
+                // Android Back/remote Back requires TWO distinct presses.
+                // The first displays a confirmation prompt, the second exits
+                // within five seconds. Ignore duplicate key routing events.
+                const bool back_event = ev.type == SDL_KEYDOWN && !ev.key.repeat &&
+                    (ev.key.keysym.scancode == SDL_SCANCODE_AC_BACK ||
+                     ev.key.keysym.scancode == SDL_SCANCODE_ESCAPE);
+                if (back_event) {
+                    const Uint32 now = SDL_GetTicks();
+                    if (!android_last_back_ms || now-android_last_back_ms > 280u) {
+                        android_last_back_ms = now;
+                        if (android_exit_confirm_until &&
+                            !SDL_TICKS_PASSED(now, android_exit_confirm_until)) {
+                            save();
+                            if (audio) SDL_CloseAudioDevice(audio);
+                            SDL_Quit();
+                            std::exit(0);
+                        }
+                        android_exit_confirm_until = now + 5000u;
+                        SDL_Log("[ki-android] Back: confirm exit by pressing Back again");
+                    }
+                    continue;
+                }
+                if (ev.type == SDL_QUIT) {
                     save();
                     SDL_Quit();
                     std::exit(0);
                 }
+#else
+                if (ev.type == SDL_QUIT || (ev.type == SDL_KEYDOWN &&
+                    ev.key.keysym.scancode == SDL_SCANCODE_ESCAPE)) {
+                    save();
+                    SDL_Quit();
+                    std::exit(0);
+                }
+#endif
                 if (ev.type == SDL_KEYDOWN && ev.key.keysym.scancode == SDL_SCANCODE_TAB && !ev.key.repeat) turbo = !turbo;
                 if (ev.type == SDL_KEYDOWN && !ev.key.repeat &&
                     (ev.key.keysym.scancode == SDL_SCANCODE_F6 || ev.key.keysym.scancode == SDL_SCANCODE_F7)) {
@@ -1243,6 +1289,18 @@ int main(int argc, char** argv) {
             }
 #ifdef KI_ANDROID
             android_pads.poll(pads);
+            if (android_touch.take_exit_request()) {
+                const Uint32 now = SDL_GetTicks();
+                if (android_exit_confirm_until &&
+                    !SDL_TICKS_PASSED(now, android_exit_confirm_until)) {
+                    save();
+                    if (audio) SDL_CloseAudioDevice(audio);
+                    SDL_Quit();
+                    std::exit(0);
+                }
+                android_exit_confirm_until = now + 5000u;
+                SDL_Log("[ki-android] Touch EXIT: tap EXIT again to quit");
+            }
 #endif
         }
         if (frame % 600 == 0) save();  // every ~10 s, if the game wrote anything
@@ -1281,6 +1339,8 @@ int main(int argc, char** argv) {
         // events. PG-9068 is read directly using known 19-button HID layout.
         p1 &= ~android_pads.pressed(0, pad_actions);
         p2 &= ~android_pads.pressed(1, pad_actions);
+        // Touch and real Bluetooth/USB inputs are additive, never exclusive.
+        p1 &= ~android_touch.pressed();
         if (frame % 300 == 0) {
             __android_log_print(ANDROID_LOG_INFO, "KI-Gamepad",
                                 "frame=%llu p1=%03x p2=%03x (active-low bits)",
