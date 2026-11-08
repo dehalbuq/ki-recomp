@@ -6,6 +6,8 @@ import android.content.Intent;
 import android.content.res.AssetFileDescriptor;
 import android.os.Bundle;
 import android.widget.TextView;
+import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.view.Gravity;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -18,6 +20,11 @@ public class BootstrapActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        final boolean touch = getPackageManager().hasSystemFeature(
+            PackageManager.FEATURE_TOUCHSCREEN);
+        setRequestedOrientation(touch
+            ? ActivityInfo.SCREEN_ORIENTATION_FULL_USER
+            : ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         status = new TextView(this);
         status.setTextSize(22);
         status.setGravity(Gravity.CENTER);
