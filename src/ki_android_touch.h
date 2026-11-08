@@ -101,10 +101,25 @@ class TouchControls {
     }
     uint32_t pressed_for(float x, float y) const {
         uint32_t bits=0;
-        for (const auto& b:buttons_) {
-            const float dx=x-b.cx,dy=y-b.cy;
-            // Slightly bigger hit areas prevent missed taps on older touchscreens.
-            if (dx*dx+dy*dy <= b.r*b.r*1.35f) bits |= b.bits;
+        // D-pad supports diagonals with ONE thumb (critical for KI specials).
+        // The central deadzone is small; sliding between quadrants changes
+        // directional bits without releasing the SDL finger contact.
+        const float center_x=buttons_[0].cx;
+        const float center_y=buttons_[2].cy;
+        const float step=std::max(1.0f,(buttons_[1].cy-buttons_[0].cy)*0.5f);
+        const float dx=x-center_x,dy=y-center_y;
+        if (std::fabs(dx)<=step*1.60f && std::fabs(dy)<=step*1.60f) {
+            const float threshold=step*0.25f;
+            if(dx<-threshold)bits|=0x100;
+            if(dx>threshold)bits|=0x200;
+            if(dy<-threshold)bits|=0x040;
+            if(dy>threshold)bits|=0x080;
+        }
+        for (size_t i=4;i<buttons_.size();++i) {
+            const auto& b=buttons_[i];
+            const float ax=x-b.cx,ay=y-b.cy;
+            // Slightly bigger hit areas prevent missed taps.
+            if (ax*ax+ay*ay <= b.r*b.r*1.35f) bits |= b.bits;
         }
         return bits;
     }
