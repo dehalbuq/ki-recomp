@@ -1,5 +1,29 @@
 # Killer Instinct Android ARMv7 — experimental cloud build
 
+## v0.7 — arcade joystick, physical controller auto-hide, rotation and private icon
+
+- Replaced the 4-way touch D-pad with an eight-way analog-style arcade
+  ball-top. One thumb can execute diagonals and slide between directions.
+  Six blue round attack buttons follow the reference arcade layout.
+- The SDL physical-gamepad selector now exposes `has_any()`, excluding Chanuo
+  IR/virtual receivers. On Bluetooth/USB connection, `TouchControls` hides
+  itself and clears active fingers; it automatically returns after unplugging.
+- With the overlay hidden, the renderer centers 320×240 in the **whole output**,
+  even in portrait. With touch active, controls flank a centered 4:3 game in
+  landscape or occupy the bottom of the portrait screen. Pixel scaling stays
+  integer-first, while SDL2/GLES2 and game timing are unchanged.
+- The SDL Java orientation callback is overridden in `KIActivity` so
+  Android `SCREEN_ORIENTATION_FULL_USER` is honored on touchscreen devices
+  (follows the user's auto-rotate lock). Non-touch TV hardware remains
+  landscape. The BootstrapActivity handles rotation config changes without
+  restarting an ongoing asset-copy operation.
+- The user's supplied Killer Instinct logo is stored **only** in the private
+  repository under `branding/ki_custom_logo.webp`. The private workflow
+  copies it into the Android resources and changes the launcher icon; the
+  public source intentionally retains a generic artwork fallback.
+- The same private APK includes ARMv7 and ARM64 libraries, the arcade game
+  data owned by the user, and the established double-Back exit confirmation.
+
 ## v0.6 Adaptive touch controls and guarded Back exit
 
 - The Android app checks `PackageManager.FEATURE_TOUCHSCREEN` and passes
