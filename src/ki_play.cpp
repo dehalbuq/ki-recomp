@@ -762,6 +762,7 @@ int main(int argc, char** argv) {
     // gpio_ir_recv / virtual-search remote devices and allows raw joysticks.
     ki_android::PhysicalGamepads android_pads;
     android_pads.poll(pads);
+    android_touch.set_gamepad_present(android_pads.has_any());
 #endif
     uint64_t saved_writes = 0;
     uint64_t title_reset_frame = 0;
@@ -829,6 +830,8 @@ int main(int argc, char** argv) {
         auto rgb = board.framebuffer_rgb(ctx);
 #endif
 #ifdef KI_ANDROID
+        // With physical input connected, the touch overlay disappears and
+        // portrait game geometry becomes centered across the FULL screen.
         const SDL_FRect game = android_touch.enabled()
             ? android_touch.game_rect(renderer)
             : android_centered_game_rect(renderer);
@@ -1289,6 +1292,7 @@ int main(int argc, char** argv) {
             }
 #ifdef KI_ANDROID
             android_pads.poll(pads);
+            android_touch.set_gamepad_present(android_pads.has_any());
             if (android_touch.take_exit_request()) {
                 const Uint32 now = SDL_GetTicks();
                 if (android_exit_confirm_until &&
@@ -1340,7 +1344,7 @@ int main(int argc, char** argv) {
         p1 &= ~android_pads.pressed(0, pad_actions);
         p2 &= ~android_pads.pressed(1, pad_actions);
         // Touch and real Bluetooth/USB inputs are additive, never exclusive.
-        p1 &= ~android_touch.pressed();
+        if (android_touch.overlay_visible()) p1 &= ~android_touch.pressed();
         if (frame % 300 == 0) {
             __android_log_print(ANDROID_LOG_INFO, "KI-Gamepad",
                                 "frame=%llu p1=%03x p2=%03x (active-low bits)",
