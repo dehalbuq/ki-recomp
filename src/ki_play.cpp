@@ -1070,7 +1070,12 @@ int main(int argc, char** argv) {
                     pad_setup.toggle();
                     continue;
                 }
-                if (ev.type == SDL_QUIT || (ev.type == SDL_KEYDOWN && ev.key.keysym.scancode == SDL_SCANCODE_ESCAPE)) {
+                if (ev.type == SDL_QUIT || (ev.type == SDL_KEYDOWN &&
+                    (ev.key.keysym.scancode == SDL_SCANCODE_ESCAPE
+#ifdef KI_ANDROID
+                     || ev.key.keysym.scancode == SDL_SCANCODE_AC_BACK
+#endif
+                     ))) {
                     save();
                     SDL_Quit();
                     std::exit(0);
@@ -1193,6 +1198,23 @@ int main(int argc, char** argv) {
         for (const KeyBit& k : kKeys)
             if (keys[k.key]) (k.player == 1 ? p1 : p2) &= ~k.bit;
 #ifdef KI_ANDROID
+        // SDL 2.30 maps Android KEYCODE_DPAD_CENTER to SDL_SCANCODE_SELECT.
+        // A TV remote can insert a coin with a short OK press, then hold OK
+        // for 650ms to press arcade START. Bluetooth gamepads are unchanged.
+        static Uint32 tv_ok_pressed_at = 0;
+        const bool tv_ok = keys[SDL_SCANCODE_SELECT] ||
+                           keys[SDL_SCANCODE_RETURN] ||
+                           keys[SDL_SCANCODE_KP_ENTER];
+        if (tv_ok) {
+            if (!tv_ok_pressed_at) tv_ok_pressed_at = SDL_GetTicks();
+            const Uint32 held = SDL_GetTicks() - tv_ok_pressed_at;
+            p1 &= ~(held >= 650u ? 0x400u : 0x800u);
+        } else {
+            tv_ok_pressed_at = 0;
+        }
+        // Remote arrows are already handled by the normal keyboard map.
+        // The six attack buttons still require a proper gamepad.
+
         // Poll raw state EVERY frame. Some Mediatek Android TV builds forward
         // controller events to their IR remote while hiding PG-9068 button
         // events. PG-9068 is read directly using known 19-button HID layout.
