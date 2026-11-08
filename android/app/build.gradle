@@ -9,8 +9,8 @@ android {
         applicationId 'br.com.dehalbuq.kiandroid'
         minSdk 19
         targetSdk 28
-        versionCode 6
-        versionName '0.6-adaptive-touch-exit'
+        versionCode 7
+        versionName '0.7-arcade-stick-autorotate'
         // Universal TV APK: 32-bit boxes/projectors and ARM64-only Android TV devices.
         // ARM64 uses the NDK's minimum supported API 21; ARMv7 remains API 19.
         ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }
