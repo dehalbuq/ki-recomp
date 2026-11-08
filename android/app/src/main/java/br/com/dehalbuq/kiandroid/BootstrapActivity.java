@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.res.AssetFileDescriptor;
 import android.os.Bundle;
 import android.widget.TextView;
+import android.view.Gravity;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -18,9 +19,12 @@ public class BootstrapActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         status = new TextView(this);
-        status.setTextSize(18);
+        status.setTextSize(22);
+        status.setGravity(Gravity.CENTER);
         status.setPadding(32, 48, 32, 32);
-        status.setText("Preparando Killer Instinct...");
+        status.setTextColor(0xffffffff);
+        status.setBackgroundColor(0xff180c10);
+        status.setText("KILLER INSTINCT ARCADE\n\nPreparando os arquivos do jogo...\n\nUse um controle Bluetooth ou USB para jogar.");
         setContentView(status);
         new Thread(new Runnable() {
             @Override public void run() {
@@ -54,7 +58,10 @@ public class BootstrapActivity extends Activity {
 
     private void showProgress(final String message) {
         runOnUiThread(new Runnable() {
-            @Override public void run() { status.setText(message); }
+            @Override public void run() {
+                status.setText("KILLER INSTINCT ARCADE\n\n" + message +
+                    "\n\nControle Bluetooth/USB recomendado.");
+            }
         });
     }
 
