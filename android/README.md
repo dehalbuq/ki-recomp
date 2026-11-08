@@ -1,5 +1,28 @@
 # Killer Instinct Android ARMv7 — experimental cloud build
 
+## v0.6 Adaptive touch controls and guarded Back exit
+
+- The Android app checks `PackageManager.FEATURE_TOUCHSCREEN` and passes
+  `--touchscreen` only on real touch-capable devices. Android TV without a
+  touchscreen retains the no-overlay 4:3 centered display.
+- Touch and Bluetooth/USB inputs are combined with bitwise OR (active-low P1
+  cabinet bits); plugging in a physical controller does not hide the overlay
+  or interrupt touch controls.
+- The SDL2 overlay supports multiple concurrent fingers: 4-way D-pad, six
+  cabinet attacks (H1/H2/H3 and L1/L2/L3), COIN, START, and EXIT.
+- In landscape, the game remains centered in the area between the left and
+  right touch rails; in portrait, the game is centered in the upper ~60% and
+  controls fill the lower section. Integer texture scaling is preferred.
+- Android Back is trapped by `KIActivity` and forwarded as a native key
+  event. First Back displays an in-game confirmation; a second distinct Back
+  within five seconds exits. The touchscreen EXIT button follows the same
+  two-step confirmation policy. Double-Back is not needed for the Home button.
+- The activity supports sensor-based orientation changes. Background events
+  clear all active finger contacts so no attack remains stuck after resume.
+- The existing Chanuo A1 PG-9068 raw HID fallback, SDL audio smoothing,
+  ARMv7/ARM64 native libraries, Android TV Leanback banner, original assets
+  and SDL2/GLES2 renderer remain unchanged.
+
 ## Android TV / Google TV — v0.4 universal
 
 The private CI now packages one APK with both `armeabi-v7a` and `arm64-v8a`.
@@ -26,7 +49,7 @@ require backing up saved game data and uninstalling the previous version.
 This public patch contains only source, not original ROMs, CHDs or generated MIPS code.
 The matching private workflow must live in the owner's **PRIVATE** repository.
 
-- ABI: `armeabi-v7a` only.
+- ABI: `armeabi-v7a` + `arm64-v8a` (universal).
 - Min SDK: API 19 (Android 4.4), NDK r25c.
 - Renderer: SDL2/OpenGL ES 2, 4:3, nearest-neighbor scaling.
 - SDL2 pinned to `release-2.30.12` by private Actions checkout.
@@ -42,7 +65,7 @@ The matching private workflow must live in the owner's **PRIVATE** repository.
   raw SDL joystick each frame, using its verified D-pad buttons 11-14 and
   left-stick axes 0-1. SDL GameController support remains for other devices.
 - Hot-plug and SDL app foreground events re-enumerate physical controllers.
-  Touch controls are not implemented yet.
+  Touch controls are automatically activated on real touchscreen devices since v0.6.
 - Initial v0.1 APK was confirmed working on Android ARMv7, including Bluetooth gamepad and resume after standby (user hardware test).
 - v0.2 is the **audio smoothing experiment**: SDL device buffer grows from 1024 to 2048 samples (at 31250 Hz); queued PCM is primed before playback and the existing R36S WSOLA algorithm can compensate for sustained guest-frame slowdowns without changing arcade guest timing.
 - The exact original PCM queue remains available for A/B comparisons by setting `KI_ANDROID_AUDIO_ORIGINAL=1` in the SDL Android app environment (for example via `SDL_ENV.KI_ANDROID_AUDIO_ORIGINAL` in the KIActivity AndroidManifest and rebuilding).
