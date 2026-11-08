@@ -1,5 +1,28 @@
 # Killer Instinct Android ARMv7 — experimental cloud build
 
+## Android TV / Google TV — v0.4 universal
+
+The private CI now packages one APK with both `armeabi-v7a` and `arm64-v8a`.
+It keeps Android 4.4 / API 19 support for ARMv7, and Android 5.0 / API 21+
+for ARM64. A device that supports only x86/x86_64 cannot install these ABIs.
+
+The app has `MAIN` + `LEANBACK_LAUNCHER` intent filters on its launcher
+activity, optional leanback/touchscreen/faketouch features, and a generated
+320x180 TV banner plus an app icon. Source art is created without proprietary
+game graphics by running `python3 android/tools/make_tv_art.py` before Gradle.
+
+TV remote input uses SDL's Android key mappings. D-pad navigation already
+uses the arcade keyboard direction bits. For the OK / D-pad center key,
+a short press inserts COIN, and a hold of 650ms presses START. The Back
+key exits; Bluetooth or USB gamepad is recommended for all six arcade attacks.
+Previous Chanuo A1 PG-9068 raw HID detection and SDL audio smoothing remain.
+
+The private release artifact remains restricted to the owner's private Actions
+run because it embeds original game assets. Do not distribute the APK or
+game-derived files to the public repository. Debug signing on ephemeral cloud
+runners may differ between builds, so installing over an older test APK can
+require backing up saved game data and uninstalling the previous version.
+
 This public patch contains only source, not original ROMs, CHDs or generated MIPS code.
 The matching private workflow must live in the owner's **PRIVATE** repository.
 
