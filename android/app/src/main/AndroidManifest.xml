@@ -10,7 +10,8 @@
   <application
       android:allowBackup="false"
       android:label="Killer Instinct Arcade"
-      android:icon="@drawable/ki_tv_icon"
+      android:icon="@drawable/ki_custom_logo"
+      android:roundIcon="@drawable/ki_custom_logo"
       android:banner="@drawable/ki_tv_banner"
       android:hasCode="true"
       android:hardwareAccelerated="true"
