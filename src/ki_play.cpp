@@ -99,6 +99,25 @@ constexpr double kFrameSeconds = 1.0 / (6.25e6 / (406.0 * 261.0));
 constexpr const char* kTitle = "Killer Instinct (recompiled)";
 constexpr int kWideW = 427;  // 240 * 16 / 9
 
+#ifdef KI_ANDROID
+// Real GLES/SDL output can be 1920x1080 while the app/window reports 320x240.
+// Use the renderer's actual drawable pixel size; never assume a 4:3 window.
+// Choose integer pixel scaling whenever possible to avoid blurred game art.
+SDL_FRect android_centered_game_rect(SDL_Renderer* renderer) {
+    int output_w = 0, output_h = 0;
+    if (SDL_GetRendererOutputSize(renderer, &output_w, &output_h) != 0 ||
+        output_w <= 0 || output_h <= 0)
+        return {0.0f, 0.0f, 320.0f, 240.0f};
+    const int integer_scale = std::min(output_w / 320, output_h / 240);
+    const float scale = integer_scale >= 1
+        ? static_cast<float>(integer_scale)
+        : std::min(output_w / 320.0f, output_h / 240.0f);
+    const float w = 320.0f * scale;
+    const float h = 240.0f * scale;
+    return {(output_w - w) * 0.5f, (output_h - h) * 0.5f, w, h};
+}
+#endif
+
 void write_ppm_file(const std::string& path, const std::vector<uint8_t>& rgb, int w, int h) {
     if (FILE* f = std::fopen(path.c_str(), "wb")) {
         std::fprintf(f, "P6\n%d %d\n255\n", w, h);
@@ -346,7 +365,15 @@ int main(int argc, char** argv) {
         w = false; // physical R36S panel and Android APK are 4:3
 #endif
         wide = w;
+#ifdef KI_ANDROID
+        // Avoid SDL logical-size viewports anchored at the Android window's
+        // (0,0); full output centering happens in present() each frame.
+        SDL_RenderSetLogicalSize(renderer, 0, 0);
+        SDL_RenderSetScale(renderer, 1.0f, 1.0f);
+        SDL_RenderSetViewport(renderer, nullptr);
+#else
         SDL_RenderSetLogicalSize(renderer, wide ? kWideW : 320, 240);
+#endif
         int ww = 0, wh = 0;
         SDL_GetWindowSize(window, &ww, &wh);
 #ifndef KI_ANDROID
@@ -737,6 +764,13 @@ int main(int argc, char** argv) {
     static std::vector<ki::pad::Action> pad_actions = ki::pad::load_bindings(pref_path() + "pad_map.txt");
     static ki::pad::SetupScreen pad_setup(pad_actions, pref_path() + "pad_map.txt");
     auto present = [&](ki::Context& ctx) {
+#ifdef KI_ANDROID
+        // Re-query drawable dimensions on every frame: handles Android TV
+        // surface recreation / resolution and orientation changes without
+        // touching arcade timing or gamepad input.
+        SDL_RenderSetViewport(renderer, nullptr);
+        SDL_RenderSetScale(renderer, 1.0f, 1.0f);
+#endif
 #ifdef KI_R36S
 #ifndef KI_R36S_RELEASE_CLEAN
         const auto render_begin = std::chrono::steady_clock::now();
@@ -781,7 +815,21 @@ int main(int argc, char** argv) {
 #else
         auto rgb = board.framebuffer_rgb(ctx);
 #endif
+#ifdef KI_ANDROID
+        const SDL_FRect game = android_centered_game_rect(renderer);
+        // Record output changes without per-frame log spam, for TV diagnosis.
+        static int last_output_w = -1, last_output_h = -1;
+        int output_w = 0, output_h = 0;
+        if (SDL_GetRendererOutputSize(renderer, &output_w, &output_h) == 0 &&
+            (output_w != last_output_w || output_h != last_output_h)) {
+            SDL_Log("[ki-android-tv] output=%dx%d game={%.0f,%.0f,%.0f,%.0f} centered 4:3",
+                    output_w, output_h, game.x, game.y, game.w, game.h);
+            last_output_w = output_w;
+            last_output_h = output_h;
+        }
+#else
         const SDL_FRect game{wide ? (kWideW - 320) / 2.0f : 0.0f, 0.0f, 320.0f, 240.0f};
+#endif
         if (wide) {
             // Ambient sides: the picture averaged down to 40x30, stretched over the
             // whole view (the linear filter blurs it), then darkened.
@@ -907,11 +955,24 @@ int main(int argc, char** argv) {
 #endif
 #endif
         }
-        // The setup screen is laid out for the 4:3 area.
+        // The setup screen uses original 320x240 arcade coordinates.
+        // Match its viewport to the actual centered game rectangle on TVs.
+#ifdef KI_ANDROID
+        SDL_Rect area{
+            static_cast<int>(game.x), static_cast<int>(game.y),
+            static_cast<int>(game.w), static_cast<int>(game.h)
+        };
+        SDL_RenderSetViewport(renderer, &area);
+        SDL_RenderSetScale(renderer, game.w / 320.0f, game.h / 240.0f);
+        pad_setup.draw(renderer, pads);
+        SDL_RenderSetScale(renderer, 1.0f, 1.0f);
+        SDL_RenderSetViewport(renderer, nullptr);
+#else
         SDL_Rect area{static_cast<int>(game.x), 0, 320, 240};
         SDL_RenderSetViewport(renderer, &area);
         pad_setup.draw(renderer, pads);
         SDL_RenderSetViewport(renderer, nullptr);
+#endif
 #ifdef KI_R36S
         if (r36s_menu_open) ki_r36s::draw(renderer, r36s_menu_choice);
 #ifndef KI_R36S_RELEASE_CLEAN
