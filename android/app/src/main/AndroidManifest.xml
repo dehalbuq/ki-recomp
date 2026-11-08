@@ -17,7 +17,7 @@
       android:isGame="true"
       android:theme="@android:style/Theme.Holo.NoActionBar.Fullscreen">
     <activity android:name=".BootstrapActivity" android:exported="true"
-        android:screenOrientation="landscape">
+        android:screenOrientation="fullSensor">
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
@@ -29,7 +29,7 @@
       </intent-filter>
     </activity>
     <activity android:name=".KIActivity" android:exported="false"
-        android:screenOrientation="landscape" android:alwaysRetainTaskState="true"
+        android:screenOrientation="fullSensor" android:alwaysRetainTaskState="true"
         android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation">
       <meta-data android:name="SDL_ENV.SDL_RENDER_DRIVER" android:value="opengles2" />
       <meta-data android:name="SDL_ENV.SDL_RENDER_SCALE_QUALITY" android:value="0" />
